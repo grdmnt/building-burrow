@@ -34,13 +34,14 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- WithClock(fake.Now), WithSweepInterval(time.Millisecond): 100 keys with 1s TTL, fake.Advance(2s); testkit.Eventually Len is 0 without any read having happened
-- OnEvict exactly once per key: 200 expired keys, 4 reader goroutines hammering Get while the sweeper runs; Eventually the count reaches 200 and after a further 20 ms it is still exactly 200
-- OnEvict is not called for Delete, overwrite with Set, or CompareAndDelete (fake clock advanced an hour, sleep 30 ms, count is 0)
+- WithClock(fake.Now), WithSweepInterval(5ms): 100 keys with 1s TTL, Advance(2s); testkit.Eventually OnEvict has fired for all 100 without any read, and 30 ms of further sweeps add no calls
+- OnEvict receives the expired Entry with its key, value, version and ExpiresAt
+- OnEvict exactly once per key: 200 expired keys, 4 reader goroutines hammering Get while the sweeper runs; Eventually the count reaches 200 and 20 ms later it is still exactly 200
+- OnEvict is not called for Delete, overwrite with Set, or CompareAndDelete (fake clock advanced an hour, 30 ms of sweeps, count is 0)
 - OnEvict may call m.Set on another key without deadlocking, and that Set lands
-- Close stops the sweeper: testkit.NoLeaks sees the goroutine count return to baseline; Close twice and from 8 goroutines all return nil
-- After Close every method returns ErrClosed
-- Real clock: a store with a 5 ms sweep interval and a 30 ms TTL has Len 0 within 200 ms with no reads
+- Real clock: WithSweepInterval(5ms) and a 30 ms TTL, Len reaches 0 within 2 s with no reads
+- Close stops the sweeper: testkit.NoLeaks sees the goroutine count return to baseline; Close from 10 goroutines at once and a second Close all return nil
+- After Close every method (Get, Set, Delete, Keys, CompareAndSwap, CompareAndDelete, SetWithTTL, Touch) returns ErrClosed
 
 ## Uses
 

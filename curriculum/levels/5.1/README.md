@@ -25,12 +25,11 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Build the binary; start with -data in a temp dir; set 500 keys (some with TTL, some via CAS) with client.Client; SIGKILL; restart; every key reads back with the same Version and ExpiresAt
-- SIGTERM: exit 0, snapshot.db exists, wal.log is under 64 bytes, and a restart serves the same state
-- -snapshot-every 100 with 350 writes: snapshot.db exists mid-run and the log holds at most 100 records
-- `burrowd compact -data` on a stopped data dir shrinks the log and preserves state
-- `listening on` is not printed until replay of a 50,000-record log is complete (a client dialing right after the line sees all keys)
-- Without -data the daemon still works from memory (3.5's tests still pass)
+- Build the binary; start with -data in a temp dir; set 500 keys (some with TTL, some via CAS) with client.Client; SIGKILL; restart; every key reads back with the same Version and an ExpiresAt that hasn't moved
+- SIGTERM: exit 0 within 10 s, snapshot.db exists, wal.log is under 64 bytes, and a restart serves the same 50 keys
+- -snapshot-every 100 with 350 writes: snapshot.db appears mid-run, the log holds at most 100 records (read with wal.Open on a copy), and a restart has the latest value
+- `burrowd compact -data` on a stopped data dir empties the log and preserves state; `compact` without -data is a usage error (exit 2)
+- `listening on` is not printed until replay of a 50,000-record log is complete: a client dialing right after the line sees every key
 
 ## Try it
 

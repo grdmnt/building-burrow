@@ -51,14 +51,14 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- conntrack: Add/SetBusy/Remove/Len; CloseIdle closes only idle; Drain returns nil once busy connections go idle and ctx.Err() at the deadline with everything closed; 100 goroutines mutating the tracker under -race
+- conntrack: Add/SetBusy/Remove/Len; CloseIdle closes only idle connections and removes them; CloseAll closes busy and idle alike; Drain returns nil once a busy connection goes idle (and waits for it); Drain with a stuck connection returns ctx.Err() at the deadline and force-closes everything; 100 goroutines mutating the tracker under -race
 - Shutdown with no connections is instant; 5 idle connections are closed right away (their reads see EOF)
 - A request mid-flight (a fake store blocking 300 ms) still gets its reply, then that connection closes
 - A 100 ms ctx against a 3 s request: Shutdown returns context.DeadlineExceeded and force-closes
 - No new connections are served after Shutdown starts; concurrent and repeated Shutdowns all return nil; Serve after Shutdown returns ErrServerClosed
 - testkit.NoLeaks across the whole suite
-- The real binary: build, start with -addr 127.0.0.1:0, parse the listening line, set and get a key with client.Client, send SIGINT then (fresh process) SIGTERM; both exit 0 with `shutting down` on stderr
-- burrowd serve with a bad address exits 1; stray arguments exit 2
+- The real binary: build, start with -addr 127.0.0.1:0, parse the `listening on` line, set and get a key with client.Client, send SIGINT then (fresh process) SIGTERM; both exit 0 within 5 s with `shutting down` on stderr
+- burrowd serve with an unusable address exits 1 and explains on stderr; `serve extra` and `serve -bogus` exit 2
 
 ## Try it
 

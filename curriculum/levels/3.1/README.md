@@ -28,9 +28,9 @@ func ServeEcho(ln net.Listener, logger *slog.Logger) error
 - An idle client doesn't block a second one (goroutine per connection)
 - 50 concurrent clients each get their own 64 KiB back uncorrupted
 - Half-close: client CloseWrite, server echoes what it got then closes; client reads EOF
-- ServeEcho and ServeConns return nil (not an error) once the listener closes; a listener that fails Accept for another reason has that error returned
 - Log lines contain `client connected`, `remote=127.0.0.1:`, `client disconnected`, `bytes=5`; a nil logger works
-- ServeConns: a handler that panics is not required to be recovered here, but a handler that returns leaves no goroutine behind (testkit.NoLeaks)
+- ServeConns calls the handler once per connection (three connections, three handlers), returns nil once the listener closes, and leaves no goroutine behind (testkit.NoLeaks)
+- A listener whose Accept fails with another error: ServeConns returns that error as-is
 
 ## Try it
 

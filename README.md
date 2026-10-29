@@ -87,4 +87,4 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 | D | Eventually Consistent | 3 | optional epilogue: a hash ring, quorum replication, and the checker catching it |
 | Q | Queues | 4 | optional: a durable queue broker, peek-lock, competing consumers, then the real Azure Service Bus |
 
-47 mandatory levels, 12 optional. Chapters 0 to 7.2 have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).
+47 mandatory levels, 12 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts chapter have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).

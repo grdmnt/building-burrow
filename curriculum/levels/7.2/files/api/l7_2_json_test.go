@@ -239,17 +239,24 @@ func TestL7_2_BatchConditional(t *testing.T) {
 		{"op":"put","key":"c","value":"Yg==","if_version":0},
 		{"op":"put","key":"c","value":"Yw==","if_version":1,"ttl":"1h"},
 		{"op":"delete","key":"c","if_version":1},
-		{"op":"delete","key":"c","if_version":2}
+		{"op":"delete","key":"c","if_version":2},
+		{"op":"put","key":"ghost","value":"YQ==","if_version":5},
+		{"op":"delete","key":"ghost","if_version":1}
 	]}`
 	_, raw := do(t, "POST", base+"/v1/batch", body, "Content-Type", "application/json")
 	var out struct {
 		Results []api.BatchResult `json:"results"`
 	}
 	json.Unmarshal([]byte(raw), &out)
-	want := []bool{true, false, true, false, true}
+	want := []bool{true, false, true, false, true, false, false}
 	for i, ok := range want {
 		if i >= len(out.Results) || out.Results[i].OK != ok {
 			t.Errorf("conditional batch op %d: ok should be %v; results %s", i, ok, raw)
+		}
+	}
+	for _, i := range []int{5, 6} {
+		if i < len(out.Results) && (out.Results[i].Error == nil || out.Results[i].Error.Code != "version_mismatch") {
+			t.Errorf("op %d: a conditional op on a missing key fails its precondition: want version_mismatch, got %+v", i, out.Results[i].Error)
 		}
 	}
 	if len(out.Results) > 2 && out.Results[2].Entry != nil && out.Results[2].Entry.ExpiresAt == nil {

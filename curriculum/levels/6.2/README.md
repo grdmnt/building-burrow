@@ -47,15 +47,17 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Write without WriteHeader: 200, Date in http.TimeFormat, Content-Length, default Content-Type; custom status and headers appear; WriteHeader twice keeps the first; header changes after WriteHeader are ignored
-- Reason phrases for 200/201/204/301/304/400/404/413/431/500/505 and a bare `299 ` for an unknown status, all parsed by net/http's ReadResponse
-- A handler echoing the body: 5-byte, 0-byte and 512 KiB bodies round-trip through net/http's client
-- No Content-Length: Body reads EOF immediately and ContentLength is 0
-- Content-Length `abc`, `-1`, `1e3`: 400 before the handler runs
-- Over MaxBodyBytes (and over the 1 MiB default): 413, handler not called, connection closed
+- Write without WriteHeader: 200, Content-Length 2, default Content-Type text/plain; charset=utf-8, a Date in HTTP date format ending in GMT and within a minute of now
+- Custom status and headers appear (Set, Add twice sends two values, Del removes); a Content-Type the handler set is kept
+- Reason phrases for 200/201/400/404/405/500/503; 299 produces a status line net/http can parse, exactly `HTTP/1.1 299 ` with an empty reason
+- WriteHeader twice keeps the first; header changes after WriteHeader are not sent
+- A handler echoing the body sees ContentLength 11 and 5-byte, 0-byte and 512 KiB bodies round-trip through net/http's client
+- A GET with no body has a non-nil Body that reads as empty
+- Content-Length `abc`, `-1`, `1e3`, `+5`, `5 5` and a 23-digit number: 400 before the handler runs, then the connection closes
+- MaxBodyBytes 10: an 11-byte body is 413 (either reason phrase) without calling the handler, a 10-byte body is fine; with MaxBodyBytes unset, 1 MiB + 1 is 413
 - A body cut short by the client: the handler's Read returns io.ErrUnexpectedEOF
-- 204 and 304: no body, no Content-Length, Write returns ErrBodyNotAllowed; HEAD gets GET's Content-Length and no body bytes
-- A panicking handler: the client sees 500 and the next request on a new connection is served
+- 204 and 304: no body, no Content-Length, Write returns ErrBodyNotAllowed; HEAD gets GET's Content-Length (12) and no body bytes
+- A panicking handler: the client sees 500 and the next request is served
 
 ## Uses
 

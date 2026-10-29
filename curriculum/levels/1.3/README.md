@@ -35,13 +35,13 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Set returns Version 1, then 2, 3; Get reports the same; Delete then Set restarts at 1
+- Set returns Version 1, then 2, 3; Get reports the same; Delete then Set restarts at 1 (storetest.RunCAS VersionsCount)
 - CAS with the right version succeeds and bumps the version; the wrong version returns ErrVersionMismatch and leaves the value and version untouched
-- CAS with ifVersion 0 creates a missing key (Version 1) and fails with ErrVersionMismatch when the key exists
-- CAS with ifVersion != 0 on a missing key is ErrNotFound
-- CompareAndDelete: right version deletes, wrong version is ErrVersionMismatch, missing key is ErrNotFound
-- Counter: 50 goroutines x 200 iterations of Get, parse, CAS, retry on mismatch; final value is 10,000 and the test counts at least one ErrVersionMismatch
-- Invalid key and cancelled context fail before anything happens; the value slice passed to CAS is copied
+- CAS with ifVersion 0 creates a missing key (Version 1) and fails with ErrVersionMismatch when the key exists; CAS with ifVersion 7 on a missing key is ErrNotFound
+- CompareAndDelete: stale version is ErrVersionMismatch and deletes nothing, right version deletes, missing key is ErrNotFound; after a CompareAndDelete, CAS with the old version is ErrNotFound and CAS with ifVersion 0 recreates the key at Version 1
+- Counter: 50 goroutines x 200 iterations of Get, parse, CAS, retry on mismatch; final value is 10,000 and the test logs how many mismatches happened
+- CAS copies the value slice it is given
+- Invalid key (CAS and CompareAndDelete) and cancelled context fail before anything is stored
 - storetest.RunCAS passes
 
 ## Try it

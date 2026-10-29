@@ -55,14 +55,15 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Set/Get/overwrite/delete; setting a deleted key again; Len counts keys and overwrite doesn't add one
+- Set/Get/overwrite/delete; setting a deleted key again; Len counts keys and overwrite doesn't add one; Set returns the stored Entry
+- Get of a missing key is the zero Entry with ErrNotFound; Delete of a missing key is ErrNotFound
 - Empty and nil values exist and read back as empty
-- Aliasing: mutating the slice passed to Set doesn't change the stored value; mutating what Get returned doesn't either; two Gets never share memory
+- Aliasing: mutating the slice passed to Set doesn't change the stored value; mutating the Value in an Entry returned by Set or Get doesn't either
 - Binary values with \x00 and \xff, and a 1.2 MB value
-- Invalid keys fail with ErrInvalidKey on all four methods, and Get doesn't say ErrNotFound for them
+- Invalid keys fail with ErrInvalidKey on all four methods (Get doesn't say ErrNotFound for them) and store nothing
 - A cancelled context returns context.Canceled from every method and a cancelled Set or Delete changes nothing
 - Keys: empty prefix means all; a prefix that is itself a key; prefixes of prefixes; Unicode prefixes; no match gives len 0; 1000 keys inserted in reverse come back sorted; the returned slice is a snapshot unaffected by later writes
-- 10,000 keys; two NewMemory stores share nothing
+- 10,000 keys, delete half; two NewMemory stores share nothing
 - Compile-time: *Memory satisfies store.Store and store.Store has every method storetest needs
 - storetest.Run(t, factory) passes
 

@@ -45,15 +45,15 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Records come back in order, including empty, binary and 1 MiB records; reopening appends after what's there
+- 104 records (including an empty one, one with NUL and newline bytes, and a 1 MiB one) come back in order; a new log yields nothing; reopening appends after what's there
 - Records always starts from the beginning and sees every append; iterating twice gives the same sequence
-- `for rec, err := range l.Records()`: break after the second record stops reading (a counting reader proves it); after Close, Records yields (nil, ErrClosed) once and stops
-- The yielded slice may be reused: a test that keeps the slices and compares later must copy them, and the suite documents this by checking only copies
-- Append copies what it's given: mutating rec after Append doesn't change the log
-- 20 goroutines appending at once never interleave bytes (every record decodes to one of the inputs)
-- Record over MaxRecordSize (wire.MaxRecordSize - 4) is ErrRecordTooLarge and the file is unchanged; a record of exactly MaxRecordSize works; after Close, Append returns ErrClosed
-- Open on a path in a missing directory fails; the file exists on disk after the first Append
-- kill -9: the test re-runs itself as a child (TestL4_1_zHelperWriter) that appends records and prints each one once Append returns; the parent SIGKILLs it mid-stream and every printed record is in the log
+- `for rec, err := range l.Records()`: breaking after the second of 1000 records stops the loop (Go panics if the iterator keeps calling yield)
+- Scribbling on the yielded slice doesn't change the log; mutating a slice after Append doesn't either
+- Record over MaxRecordSize is ErrRecordTooLarge and the file is unchanged
+- After Close: Append is ErrClosed, Records yields (nil, ErrClosed) exactly once, a second Close returns nil
+- Open in a missing directory fails; Open on a directory fails; after Append returns the record is already in the file
+- 20 goroutines x 50 appends never interleave bytes (every record decodes to one of the inputs)
+- kill -9: the test re-runs itself as a child (TestL4_1_zHelperAppender) that appends records and prints each one once Append returns; the parent SIGKILLs it mid-stream and every printed record is in the log
 
 ## Uses
 

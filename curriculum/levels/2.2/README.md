@@ -71,13 +71,14 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Golden: EncodeFrame(Frame{Op: OpSet, Key: "k", Value: []byte("v")}) is exactly 02 | 8 zero bytes | 8 zero bytes | 00 01 | 6b | 76 (21 bytes); WriteFrame prefixes 00 00 00 15
-- Round trips of random keys and values, empty key, empty value, Version up to math.MaxUint64, TTL negative/zero/positive, all 16 ops
-- DecodeFrame of a payload shorter than the 19-byte header is io.ErrUnexpectedEOF; a key length past the end is io.ErrUnexpectedEOF
-- Unknown ops are rejected by both Encode and Decode with ErrUnknownOp; a rejected Encode writes nothing
-- Key over MaxKeySize and value over MaxValueSize are ErrFrameTooLarge on encode; on decode the key length is checked before slicing
-- Op.String for every op and for 0x7f; IsRequest for 0x01-0x09 true, replies false
-- ReadFrame on an empty reader is io.EOF; cut mid-frame is io.ErrUnexpectedEOF (inherited from Record)
+- Golden: EncodeFrame(Frame{Op: OpSet, Key: "k", Value: []byte("v")}) is exactly 02 | 8 zero bytes | 8 zero bytes | 00 01 | 6b | 76 (21 bytes); WriteFrame prefixes 00 00 00 15; a CAS frame with Version 0x0102 and TTL 3ns shows both fields big-endian
+- Every Op has the listed byte value; Op.String for every op and `Op(0x7f)` for an unknown one; IsRequest is true for 0x01-0x09, false for replies and unknown ops
+- Round trips: Version math.MaxUint64, a negative TTL, a 90-minute TTL, and random keys and values for all 16 ops
+- Three frames written back to back read back in order, then ReadFrame returns io.EOF; a frame cut short is io.ErrUnexpectedEOF
+- DecodeFrame of a payload shorter than the 19-byte header is io.ErrUnexpectedEOF; a key length that runs past the end is io.ErrUnexpectedEOF
+- Unknown ops are rejected by both Encode and Decode with ErrUnknownOp; a rejected WriteFrame writes nothing
+- MaxKeySize is 1024 and MaxValueSize 8 MiB; a key or value over the limit is ErrFrameTooLarge on encode; on decode a key length of 65535 is rejected before slicing and a value over the limit is rejected
+- A decoded frame doesn't share memory with the payload it came from
 - FuzzL2_2_DecodeFrame never panics and a successful decode re-encodes to the same bytes
 
 ## Uses

@@ -59,16 +59,16 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Round trip of every method against a real wire.Server over loopback, including Version and ExpiresAt on returned entries
-- storetest.Run, storetest.RunCAS and storetest.RunTTL pass with a factory that starts a server and dials it (RunTTL runs on the real clock here with 50 ms TTLs)
+- storetest.Run, storetest.RunCAS and storetest.RunTTL pass with a factory that starts a wire.Server and dials it (RunTTL is on the real clock with 60 ms TTLs)
+- Entries carry Version and ExpiresAt: after a SetWithTTL of 1 minute, Get's ExpiresAt is about now + 1 minute; a key without TTL has a zero ExpiresAt
 - Missing keys are store.ErrNotFound and mismatches are store.ErrVersionMismatch, so code can't tell a remote store from a local one
-- Touch returns the full Entry (unchanged Value and Version, new ExpiresAt) and the fake server saw exactly one request
-- An OpError reply becomes *ServerError (errors.As) carrying the server's text
+- An OpError reply becomes *client.ServerError (errors.As) carrying the server's text
+- Validation is local: an invalid key (including the empty key) is store.ErrInvalidKey and an already-cancelled ctx is context.Canceled, with zero requests reaching the server; Keys with prefix `a b` is sent as exactly one request
+- Touch returns the full Entry (unchanged Value and Version, new ExpiresAt) and the server saw exactly one request
 - Binary values with NUL bytes and a 1 MiB value
 - 50 goroutines x 100 calls sharing one Client: every Get returns that goroutine's own value
-- Invalid key fails locally for every op except Keys and Ping (the fake server sees zero requests); Keys with prefix `a b` is sent and returns no keys; an already-cancelled ctx fails locally with context.Canceled
-- Dial fails fast on a closed port; calls after Close return ErrClosed; Close twice is fine
-- burrowctl: set/get/del/keys/cas (with and without -ttl)/cad/ttl/touch/ping outputs and exit codes; usage errors exit 2; a dead server exits 1 with a message
+- Dial to a closed port fails fast; calls after Close return client.ErrClosed; a second Close returns nil
+- burrowctl: set prints `OK 1`, get prints the value, cas (with and without -ttl), ttl, touch, keys (all and by prefix), cad, del, ping; `version mismatch`, `not found` and `invalid key` exit 1 with the message on stderr; usage mistakes exit 2 and explain on stderr; an unreachable server exits 1, names the address and gives up quickly
 
 ## Try it
 

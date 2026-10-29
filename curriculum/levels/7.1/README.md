@@ -45,12 +45,14 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Every 6.3 KV test passes against api.Server through httptest.NewServer
-- ETag equals the version on GET and after PUT; If-Match with the right version succeeds and bumps the ETag; wrong version is 412 and the value is unchanged; If-Match on a missing key is 412, not 404; If-Match: "0" creates only; a malformed If-Match is 400
-- PUT ?ttl=50ms then GET after 100 ms is 404; PUT with If-Match: "0" and ?ttl= creates with an expiry in one call (CompareAndSwapWithTTL); Expires header is present and in the future; ttl=0 or junk is 400; POST touch extends; POST touch without ?ttl= is 400
-- DELETE with If-Match: 204 on match, 412 on mismatch and 412 on a missing key; unconditional DELETE of a missing key is 404
-- 405 carries Allow; a 2 MiB PUT is 413 and the handler saw MaxBytesError
-- The real binary with -addr and -http: a value set over frames with client.Client is readable over HTTP and vice versa; SIGTERM exits 0 and both ports stop accepting
+- KV round trip against api.Server through httptest.NewServer: 404 for a missing key; PUT is 204 with ETag `"1"`; GET returns application/octet-stream with the ETag and no Expires; an empty body stores an empty value; DELETE is 204 then 404; an invalid key is 400 mentioning `invalid key`
+- GET /v1/keys with and without ?prefix=, one key per line, sorted
+- If-Match with the right version succeeds and bumps the ETag; a stale version is 412 and the value is unchanged; If-Match `"0"` is 412 when the key exists and creates (204) when it doesn't; If-Match `"5"` on a missing key is 412; `*`, `W/"2"`, `2`, `"two"` and `""` are 400
+- DELETE with a stale If-Match is 412, with the right one 204, on a missing key 412; an unconditional DELETE of a missing key is 404
+- PUT ?ttl=50ms then GET carries Expires in http.TimeFormat and, after 100 ms, the key is gone; ?ttl= of `0`, `-1s`, `soon` and `10` is 400; If-Match `"0"` with ?ttl=1h creates with an expiry in one call (CompareAndSwapWithTTL)
+- POST touch?ttl= is 204 with the unchanged ETag and extends the expiry; touch of a missing key is 404; touch without ?ttl= is 400
+- PATCH is 405 with Allow listing GET, PUT and DELETE; a 2 MiB PUT is 413; exactly 1 MiB is allowed
+- The real binary with -addr and -http: `listening on` then `http on`; a value set over frames with client.Client is readable over HTTP with its ETag and vice versa; SIGTERM exits 0
 
 ## Try it
 

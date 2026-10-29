@@ -19,10 +19,10 @@ Make the store safe for many goroutines. The network server in chapter 3 will ha
 ## The tests check
 
 - Runs only under the race detector (testkit.RequireRace)
-- 32 goroutines writing disjoint keys 1000 times each: every final value is right
-- Mixed hammer: 16 goroutines doing Set/Get/Delete/Keys over 32 hot keys for 200 ms; no panics, no races
-- Len and Keys called continuously while 8 writers run: Len never exceeds the key count and Keys stays sorted
-- Readers only ever see whole values: a writer alternates two 64 KiB values while readers check every read is exactly one of them
+- storetest.RunConcurrent: 16 goroutines writing 200 disjoint keys each, every final value is right; then 24 goroutines doing 600 mixed Set/Get/Delete/Keys ops over 32 hot keys
+- Len and Keys called 2000 times while a writer sets and deletes over 500 keys: Len stays within 0..500 and Keys never errors
+- Readers only ever see whole values: a writer alternates two 4 KiB values 3000 times while readers check every read is exactly one of them
+- 8 stores used from 8 goroutines at once hold 200 keys each and share nothing
 
 ## Try it
 

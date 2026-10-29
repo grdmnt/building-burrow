@@ -34,13 +34,14 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- 10,000 writes then Snapshot: wal.log is under 64 bytes and a reopen restores identical state including versions and expiries
-- Writes and deletes after a snapshot survive a reopen; repeated and empty snapshots work
-- A leftover snapshot.tmp is ignored and removed on Open
+- 10,000 writes then Snapshot: wal.log is under 64 bytes, snapshot.db exists, and a reopen restores identical state
+- Writes and deletes after a snapshot survive a reopen; repeated snapshots and a snapshot with nothing new work; a snapshot of an empty store works
+- A leftover snapshot.tmp full of garbage is ignored and removed on Open
 - Crash between rename and log reset: the old log is put back next to the new snapshot; replaying it on top still gives the right state
-- A flipped byte in snapshot.db makes Open fail (no silent partial state)
-- Snapshot while 8 goroutines write for 200 ms: after reopen every key holds its last acknowledged value and version
-- Snapshot after Close is store.ErrClosed
+- A changed byte inside a stored value in snapshot.db (the file still decodes) makes Open fail: only a checksum can catch it
+- 10 snapshots while 8 goroutines write: after reopen every key holds its last acknowledged value and version
+- Snapshot after Close is store.ErrClosed; after Snapshot, LogLen is 0 and versions and expiries are preserved
+- Memory.Snapshot returns every live entry sorted by key, as copies
 
 ## Uses
 

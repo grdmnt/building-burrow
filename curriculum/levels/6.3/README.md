@@ -41,13 +41,15 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Method and path matching; no-method patterns match any method; GET matches HEAD
-- 404 for an unknown path; 405 with sorted Allow for a known path and wrong method, HEAD listed when GET is
-- {name} and {name...} wildcards including an empty rest; PathValue of an absent name is empty
-- Percent decoding per segment: /v1/kv/a%2Fb gives key a/b; a bad escape %zz is 400
-- Most specific wins: /v1/kv/special beats /v1/kv/{key} regardless of order
-- 7 bad patterns panic at registration: empty, no leading slash, {} , {a}{b} in one segment, {rest...} not last, duplicate pattern, unterminated brace
-- KV API through net/http's client: PUT/GET/DELETE rows, ETag equals the version, 2 MiB upload is 413, NUL bytes in values survive, invalid key is 400 with the error text, GET /v1/keys with and without prefix is sorted
+- Method and path matching for GET/POST/DELETE on one path; no-method patterns match any method; GET matches HEAD (200, empty body, Content-Length 5)
+- 404 for an unknown path; 405 with `Allow: DELETE, GET, HEAD, PUT` for a known path and wrong method
+- {name} wildcards and PathValue (an absent name is empty); {path...} takes the rest including slashes and may be empty; too few, too many and empty segments are 404
+- Percent decoding per segment: /kv/a%2Fb%20c gives key `a/b c`; a bad escape %zz is 400
+- Most specific wins: /kv/special beats /kv/{key} regardless of registration order
+- Ten bad patterns panic at registration (empty, no path, double space, no leading slash, `{}`, unterminated brace, two wildcards in one segment, a repeated name, `{rest...}` not last) and so does registering the same pattern shape twice
+- KV API through net/http's client: 404 for a missing key; PUT is 204 with ETag `"1"`; GET returns the bytes (NUL included) as application/octet-stream with the ETag; a second PUT answers ETag `"2"`; DELETE is 204 then 404; an invalid key is 400 mentioning `invalid key`; an empty body stores an empty value; a 2 MiB PUT is 413; POST is 405
+- GET /v1/keys lists keys one per line, sorted, with a trailing newline, as text/plain; charset=utf-8; ?prefix= filters; no matches is an empty body
+- /v1/kv/a%2Fb stores the key `a/b`
 
 ## Try it
 

@@ -70,13 +70,15 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- GET with Accept: application/json returns KV with base64 value, version and expires_at (absent when no TTL); without Accept the 7.1 octet-stream response is unchanged
-- PUT JSON: value only; with if_version (match, mismatch -> 412 version_mismatch, missing key -> 412 version_mismatch, 0 -> create only); with ttl "50ms" -> expires_at set and the key gone after 100 ms; ttl "abc", ttl "-1s" and ttl 10 (a number) -> 400 invalid_request
-- Decoding: unknown field {"valeu": ...} -> 400 with Error mentioning `valeu`; two JSON values in one body -> 400; empty body -> 400; bad base64 -> 400; a 2 MiB body -> 413 too_large; Content-Type: text/plain on PUT still means raw value (7.1 path)
-- Every 7.1 error path now returns ErrorResponse: 404 not_found, 412 version_mismatch, 400 invalid_key, 405 method_not_allowed with Allow still present, 413 too_large
-- Batch: 1000 mixed ops return 1000 results in order; a failing op doesn't stop the rest; put or delete with if_version on a missing key gives a version_mismatch result; an empty ops array is fine; 1001 ops -> 413; an unknown op -> that result has invalid_request
-- Round trip: Duration marshals "1m30s" and unmarshals it; zero omits
-- Encoding never panics on a nil ExpiresAt; KV for an entry with empty value encodes "value": ""
+- GET with Accept: application/json returns key, base64 value and version; expires_at is omitted without a TTL and is RFC 3339 UTC with one; an empty value encodes as `"value": ""`; without the Accept header the 7.1 octet-stream response is unchanged
+- PUT JSON: value only is 200 with the KV; if_version mismatch is 412 version_mismatch; a match returns version 2; if_version 0 is 412 when the key exists and creates when it doesn't; ttl "50ms" sets expires_at and the key is gone after 100 ms; ttl "abc", "-1s" and the number 10 are 400 invalid_request
+- Content-Type: text/plain on PUT still means the body is the raw value (204)
+- Strict decoding, all 400 invalid_request: an unknown field (the error names `valeu`), two JSON values, trailing garbage, an empty body, bad base64, a string where a number is expected, an array instead of an object; a 2 MiB JSON body is 413 too_large
+- Every error is application/json ErrorResponse: 404 not_found, 412 version_mismatch, 400 invalid_key, 405 method_not_allowed (Allow kept), 413 too_large, 400 invalid_request for a bad ?ttl= and for If-Match `*`
+- GET /v1/keys with JSON returns `[]` for no keys, never null, and `["a","b"]` sorted
+- Batch: 1000 mixed ops return 1000 results in order; a put result carries its entry; an unknown op gets an invalid_request result without failing the batch; a get of a missing key gets a not_found result; a failing op doesn't stop the rest; an empty ops array is fine; 1001 ops is 413 too_large
+- Conditional batch ops: put with if_version 0 succeeds then fails, put with if_version and ttl sets an expiry (CompareAndSwapWithTTL), delete with a stale if_version fails and with the right one succeeds; put and delete with if_version on a missing key are version_mismatch results
+- Duration(90s) marshals to "1m30s" and back; "forever" fails to unmarshal; a zero ttl is omitted from PutRequest; a KV with an empty value and no expiry encodes without expires_at
 
 ## Try it
 

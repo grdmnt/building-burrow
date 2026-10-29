@@ -57,14 +57,16 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- storetest.Run, RunConcurrent, RunCAS and RunTTL pass against durable.Open(t.TempDir(), opts...) (RunTTL passes store.WithClock through)
+- storetest.Run, RunConcurrent, RunCAS and RunTTL pass against durable.Open(t.TempDir())
 - Restart restores state exactly: overwrites, deletes, empty and binary values, and Version numbers continue from where they were (Set after restart bumps, not resets)
-- A key with a 10 s TTL, restart after 3 s on the same FakeClock: ExpiresAt is unchanged and the key expires at the original instant; a key already expired at restart is invisible, OnEvict was not called for it, and the log has no delete record for it
-- A CAS counter run to 1000 then restarted reads 1000 with Version 1000; CompareAndSwapWithTTL survives a restart with its ExpiresAt
-- Rejected writes (invalid key, version mismatch, delete of a missing key), reads, and janitor evictions don't grow the log (file size and LogLen unchanged)
-- LogLen counts one record per applied change and is 0 on a fresh directory
+- Expiry is absolute: on one FakeClock, a 10 s TTL and a Touch of 20 s, close, Advance(3s), reopen: ExpiresAt is unchanged, the Touch's expiry survived, a key that expired while the store was down is gone, OnEvict never ran for it, and the key expires at its original instant
+- A CAS counter run to 1000 then restarted reads 1000 with Version 1000; a lock taken with CompareAndSwapWithTTL keeps its value, version and expiry across a restart
+- Rejected writes (invalid key, version mismatch, delete of a missing key, Touch of a missing key, ttl 0, a cancelled context) and reads don't grow the log
+- Expiries are not logged: 20 keys expire under the janitor (your WithOnEvict passed through durable.Open sees all 20) and the file size and LogLen stay at 20
+- LogLen is 0 on a fresh directory
 - Restart without Close (the file handle is simply dropped) still restores everything acknowledged
-- Open creates the directory; Open on an unwritable path fails; Close twice is nil; after Close every method returns store.ErrClosed; a caller's WithOnEvict passed to Open fires on expiry
+- Open creates nested directories and puts the log at <dir>/wal.log; Open on a path that can't be a directory fails; Close twice is nil; Set and Get after Close are store.ErrClosed
+- Memory.Restore installs an entry as given (version 42 stays 42 and the next Set gives 43); restoring an already-expired entry is not an error, installs nothing, replaces what was there, and never reaches OnEvict; Memory.Now reads the injected clock
 - kill -9: a child process writes keys through durable.Store and prints each acknowledged key; it is SIGKILLed mid-stream; every printed key is present after reopen with the right value
 
 ## Uses

@@ -39,14 +39,15 @@ Decisions the tests rely on:
 
 ## The tests check
 
-- Golden: WriteRecord of `hi` is exactly 00 00 00 02 68 69; of empty payload is 00 00 00 00
-- Round trips of random binary payloads (0 bytes, 1 byte, 1 MiB, exactly MaxRecordSize), and ten records back to back in one buffer
-- Readers from testing/iotest: OneByteReader, DataErrReader (data together with EOF), HalfReader
-- EOF: empty stream is io.EOF itself; a stream cut after 1, 3, 4 and 4+n bytes is io.ErrUnexpectedEOF
-- A header claiming 0xFFFFFFFF bytes returns ErrRecordTooLarge and testing.AllocsPerRun reports 0 large allocations; a length of MaxRecordSize+1 is rejected, MaxRecordSize accepted
-- WriteRecord calls Write exactly once (a counting writer) and reports io.ErrShortWrite for a writer that accepts fewer bytes; a writer error is returned as-is
-- The slice ReadRecord returns is independent of the reader's buffer (mutating a bytes.Reader's backing array afterwards doesn't change it)
-- AppendRecord of three payloads reads back as three records; AppendRecord rejects oversized payloads
+- Golden: WriteRecord of `hi` is exactly 00 00 00 02 68 69; of an empty payload is 00 00 00 00
+- Round trips of random binary payloads (0 bytes, 1 byte, 1 MiB, exactly MaxRecordSize), and several records back to back in one buffer
+- Readers from testing/iotest: OneByteReader, HalfReader, DataErrReader (data together with EOF)
+- EOF: an empty stream is io.EOF itself (not wrapped); a record cut at every offset after its first byte is io.ErrUnexpectedEOF
+- Headers claiming 0xFFFFFFFF and MaxRecordSize+1 bytes return ErrRecordTooLarge with at most a handful of allocations (testing.AllocsPerRun); a record of exactly MaxRecordSize reads back
+- WriteRecord over the limit is ErrRecordTooLarge and writes nothing
+- WriteRecord calls Write exactly once (a counting writer), reports io.ErrShortWrite for a writer that accepts half, and returns a writer's error as-is
+- The slice ReadRecord returns is independent of the reader's buffer
+- AppendRecord of three payloads (one empty) reads back as three records; AppendRecord over the limit returns ErrRecordTooLarge and leaves buf unchanged
 - FuzzL2_1_ReadRecord: never panics, and any successful read re-encodes to a prefix of the input
 
 ## Try it

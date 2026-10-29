@@ -32,11 +32,12 @@ Decisions the tests rely on:
 ## The tests check
 
 - Sequential: 30 appends, 30 syncs, and each append returns only after a sync covering its bytes (the slow sync records the file size at each call)
-- 100 goroutines x 20 appends with a 2 ms sync: at most 500 syncs and under 2 s (one sync per append would take 4 s)
-- A sync that fails on its 5th call: every append in that batch and every later append returns the error; Records still reads everything before the failure
+- 100 goroutines x 20 appends with a 2 ms sync: at most 500 syncs, under 2 s, all 2000 records present, and Syncs() equals the number of times the sync function ran
+- A sync that fails from its 5th call on: 6 of 10 sequential appends fail with that error (every one after the first failure); when every sync fails, no append of 50 reports success; records acknowledged before the failure are still readable
 - Close with appends in flight: nothing hangs, each append either succeeds or returns ErrClosed, everything acknowledged is on disk afterwards, no goroutine leaks
-- The CRC guard and Truncate still work with batched writes (a torn batch is a torn tail)
-- Two benchmarks, with and without contention, run with -bench=L4_5 -run=^$
+- Without WithSyncFunc the log still syncs (Syncs() >= 1)
+- 200 batched appends from 20 goroutines are still 200 separate records: Len is 200, Truncate(150) works, and tearing the last record leaves 149 after reopen
+- Two benchmarks, serial and parallel, run with -bench=L4_5 -run=^$
 
 ## Try it
 

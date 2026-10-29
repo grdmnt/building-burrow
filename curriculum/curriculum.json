@@ -1984,9 +1984,9 @@
           "idea": "Chunked transfer in both directions: a writer that switches encodings and a state-machine reader",
           "difficulty": 3,
           "build": [
-            "64 KiB buffer then switch to chunked",
-            "Chunked reader with limits",
-            "Streaming keys"
+            "64 KiB buffer then switch to chunked (close-delimited for HTTP/1.0)",
+            "A chunked request-body reader with limits",
+            "Update `KVRoutes` so `GET /v1/keys` streams with `Flush`"
           ],
           "win": "Flushed data reaches the client while the handler is still blocked, chunked uploads decode, every malformed case is rejected, and 2,500 keys stream back in order.",
           "go": [
@@ -2017,9 +2017,9 @@
           "idea": "Hardening and proving: header injection, request smuggling, 100-continue, graceful shutdown, differential tests and fuzzing against net/http",
           "difficulty": 4,
           "build": [
-            "Hardening cases",
-            "100-continue",
-            "Shutdown via conntrack",
+            "Header injection and conflicting Content-Length protection",
+            "`Expect: 100-continue`",
+            "`Shutdown` and `ErrServerClosed` on `conntrack.Tracker`",
             "Then read net/http's server.go and write down three things it handles that yours doesn't"
           ],
           "win": "Your parser agrees with net/http on 9 differential requests, survives fuzzing, never emits CR/LF from a header value, handles 1,000 keep-alive requests from 50 clients, and shuts down gracefully.",

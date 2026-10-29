@@ -27,9 +27,9 @@ Decisions the tests rely on:
 - Cancel after 50 ms mid-call: returns within 1 s with context.Canceled
 - No stale replies: the first call times out, its reply arrives 300 ms later; the next call must get its own value and the fake server has seen a second connection
 - The server hangs up mid-call: that call errors, the next call redials and succeeds
-- Dial with an already-cancelled ctx fails without connecting; Dial to a dead address fails within 2 s
+- Dial with an already-cancelled ctx fails with context.Canceled without connecting; Dial to an unroutable address with a 100 ms context deadline returns within 2 s
 - No goroutines leak across 100 timed-out calls (testkit.NoLeaks)
-- burrowctl -timeout 50ms against the slow fake exits 1 and prints `timeout`
+- burrowctl -timeout 50ms against a server that never replies exits 1 within 2 s and prints `timeout`
 
 ## Uses
 

@@ -5,26 +5,37 @@ Harden the server against injection and smuggling, add `Expect: 100-continue` an
 ## Build
 
 ```go
-func (s *Server) Shutdown(ctx context.Context) error // same contract as wire.Server.Shutdown, on conntrack.Tracker
+// httpraw/server.go additions
+var ErrServerClosed = errors.New("httpraw: server closed")
+
+// Shutdown has the same contract as wire.Server.Shutdown (3.5): stop accepting, close idle
+// keep-alive connections, let in-flight requests finish (their responses carry
+// Connection: close), force-close at the context deadline and return ctx.Err().
+// After Shutdown, Serve returns ErrServerClosed. Build it on conntrack.Tracker.
+func (s *Server) Shutdown(ctx context.Context) error
+
+// Hardening:
+//   - Expect: 100-continue: send HTTP/1.1 100 Continue\r\n\r\n before reading the body.
+//   - Never let a header value containing CR or LF, or an invalid header name, reach the wire.
+//   - Two Content-Length headers with different values, or a comma-separated list with different
+//     values, is 400 (request smuggling bait).
+//   - Request.Path stays percent-encoded; net/http compares with URL.EscapedPath().
 ```
 
-- Hardening cases
-- 100-continue
-- Shutdown via conntrack
-- Then read net/http's server.go and write down three things it handles that yours doesn't
+- `Shutdown` and `ErrServerClosed`, on `conntrack.Tracker` from 3.5: a connection waiting for its next request is idle
+- `Expect: 100-continue`
+- Header injection and conflicting `Content-Length` protection
+- Pass the differential tests and the fuzzer; then read `$(go env GOROOT)/src/net/http/server.go` (`conn.serve`, `response.finishRequest`, `Server.Shutdown`) and write down three things it handles that yours doesn't
 
-> **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/H.3/files/`, matching the earlier chapters.
+## The tests check
 
-## Pass when
-
-Your parser agrees with net/http on 9 differential requests, survives fuzzing, never emits CR/LF from a header value, handles 1,000 keep-alive requests from 50 clients, and shuts down gracefully.
-
-The suite will cover:
-
-- Differential parsing
-- Fuzz target
-- Injection and smuggling cases
-- Shutdown idle/in-flight/deadline
+- Differential parsing: 9 requests go through both your ReadRequest and net/http's; where both accept, method, escaped path, query and headers must agree
+- FuzzLH_3_ReadRequest: accepted requests never have empty Method/Proto/Path, stray whitespace in the request line, headers Get can't find, or CR/LF in header values
+- 50 clients x 20 PUT/GET pairs through keep-alive connections
+- net/http's client follows a 302 through your server; Expect: 100-continue gets `HTTP/1.1 100 Continue` before the body is read
+- Shutdown: an idle keep-alive connection closes, an in-flight request finishes with Connection: close, Serve returns ErrServerClosed; a stuck handler makes Shutdown return context.DeadlineExceeded at its deadline
+- A header value containing CR/LF never injects a new header on the wire; a header name with a space is not sent
+- Two different Content-Length headers, or a `1, 2` list, are 400 without calling the handler
 
 ## Uses
 

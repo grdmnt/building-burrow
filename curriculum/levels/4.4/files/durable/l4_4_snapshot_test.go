@@ -1,6 +1,7 @@
 package durable_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -147,15 +148,18 @@ func TestL4_4_CorruptSnapshotIsAnError(t *testing.T) {
 	s.Close()
 	path := filepath.Join(dir, "snapshot.db")
 	data, _ := os.ReadFile(path)
-	data[len(data)/2] ^= 0xff
+	// Damage a value's bytes, not the encoding's structure: the file still
+	// decodes, so only a checksum can tell it was changed.
+	i := bytes.LastIndex(data, []byte("value"))
+	if i < 0 {
+		t.Fatal("couldn't find a stored value in snapshot.db (is it encoded some other way?)")
+	}
+	data[i] ^= 0x01
 	os.WriteFile(path, data, 0o644)
 	s2, err := durable.Open(dir)
 	if err == nil {
-		keys, _ := s2.Keys(bg, "")
 		s2.Close()
-		if len(keys) != 51 {
-			t.Fatalf("a corrupt snapshot opened silently with %d of 51 keys. Fail loudly instead: checksum the snapshot.", len(keys))
-		}
+		t.Fatalf("Open accepted a snapshot.db with a flipped byte. Fail loudly instead of serving state you can't trust: checksum the snapshot.")
 	}
 }
 
