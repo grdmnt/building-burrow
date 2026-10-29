@@ -224,7 +224,17 @@ func cmdShow(w *world, args []string) error {
 		return err
 	}
 	s := w.levelState(l)
-	status := map[state]string{stDone: green("complete"), stCurrent: cyan("in progress"), stOpen: "available", stLocked: gray("locked: " + w.lockReason(l))}[s]
+	var status string
+	switch s {
+	case stDone:
+		status = green("complete")
+	case stCurrent:
+		status = cyan("in progress")
+	case stOpen:
+		status = "available"
+	default:
+		status = gray("locked: " + w.lockReason(l))
+	}
 	head := "\n  " + gray(chapterLabel(l.ch)+" · "+l.ch.Name) + gray("  ·  ") + status + gray("  ·  produces ") + amber(l.Unlock)
 	body := renderMarkdown(string(src))
 	foot := "\n" + rule("") + "\n  " + gray("Hints: ") + fmt.Sprintf("%d/%d revealed", w.prog.Hints[l.ID], len(l.Hints)) + gray("  ·  burrow hint") + "\n"
