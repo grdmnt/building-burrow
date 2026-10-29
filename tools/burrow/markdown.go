@@ -64,11 +64,13 @@ func renderMarkdown(src string) string {
 		switch {
 		case strings.HasPrefix(l, "# "):
 			flush()
-			out = append(out, "", "  "+bold(cyan(strings.TrimPrefix(l, "# "))), "")
+			out = appendGap(out)
+			out = append(out, "  "+bold(cyan(strings.TrimPrefix(l, "# "))))
 		case strings.HasPrefix(l, "## "):
 			flush()
 			h := strings.ToUpper(strings.TrimPrefix(l, "## "))
-			out = append(out, "", "  "+bold(h)+" "+faint(strings.Repeat("─", max(0, width-len(h)-1))))
+			out = appendGap(out)
+			out = append(out, "  "+bold(h)+" "+faint(strings.Repeat("─", max(0, width-len(h)-1))))
 		case strings.HasPrefix(l, "> "):
 			flush()
 			for _, wl := range wrapVisible(inline(strings.TrimPrefix(l, "> ")), width-2) {
@@ -127,8 +129,18 @@ func renderTable(rows [][]string, width int) []string {
 	for _, w := range widths {
 		total += w + 3
 	}
-	if total > width && cols > 1 {
-		widths[cols-1] = max(12, widths[cols-1]-(total-width))
+	for total > width {
+		wi := 0
+		for k := range widths {
+			if widths[k] > widths[wi] {
+				wi = k
+			}
+		}
+		if widths[wi] <= 12 {
+			break
+		}
+		widths[wi]--
+		total--
 	}
 	var out []string
 	for ri, r := range rows {
@@ -164,6 +176,13 @@ func renderTable(rows [][]string, width int) []string {
 			}
 			out = append(out, sep)
 		}
+	}
+	return out
+}
+
+func appendGap(out []string) []string {
+	if len(out) > 0 && out[len(out)-1] != "" {
+		return append(out, "")
 	}
 	return out
 }
