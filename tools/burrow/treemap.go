@@ -205,9 +205,7 @@ func cmdMap(w *world) error {
 		}
 		label := " " + strings.ToUpper(chapterLabel(ch)) + " "
 		cv.text(r.x+2, r.y, label, gray)
-		if ch.Optional {
-			cv.text(r.x+r.w-6, r.y, " opt ", amber)
-		}
+
 		glyph := map[state]string{stDone: gDone, stCurrent: gCurrent, stOpen: gOpen, stLocked: gLocked}[s]
 		cv.text(r.x+2, r.y+1, glyph+" "+truncate(ch.Name, r.w-6), name)
 		// level pips
@@ -236,7 +234,7 @@ func cmdMap(w *world) error {
 	fmt.Println()
 	fmt.Print(cv.String())
 	fmt.Println()
-	fmt.Println("  " + gray(green(gDone)+" complete  "+cyan(gCurrent)+" in progress  "+gOpen+" unlocked  "+faint(gLocked)+" locked  "+amber("opt")+" optional"))
+	fmt.Println("  " + gray(green(gDone)+" complete  "+cyan(gCurrent)+" in progress  "+gOpen+" unlocked  "+faint(gLocked)+" locked  "+amber("OPT")+" optional chapter"))
 	fmt.Println("  " + gray("A chapter unlocks when every arrow into it is green. ") + bold("burrow list") + gray(" for levels."))
 	fmt.Println()
 	return nil

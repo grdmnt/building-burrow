@@ -1,28 +1,80 @@
-# 3.2 · Parity Bits
+# 3.2 · Switchboard
 
-Disks and crashes produce torn and damaged records. Detect them instead of trusting the bytes.
+A request/reply loop: decode a frame, call the store, and map every outcome to exactly one reply. The server takes any `store.Store`, which is also what lets the tests inject a slow fake.
 
 ## Build
 
 ```go
-var ErrCorrupt = errors.New("wal: corrupt")
+// wire/server.go
+package wire
+
+type Server struct {
+	Store  store.Store
+	Logger *slog.Logger // nil means no logging
+}
+
+func (s *Server) Serve(ln net.Listener) error // runs on ServeConns
+
+// Reply table (every reply echoes the request's Key):
+//   OpGet     -> OpValue{Value, Version, TTL remaining} | OpNotFound   (TTL is rounded up to at least 1ns when an expiry exists, so 0 always means no expiry)
+//   OpSet     -> OpOK{Version}
+//   OpDelete  -> OpOK | OpNotFound
+//   OpKeys    -> OpKeyList{Value: keys joined by \n, empty for none}
+//   OpCAS     -> OpOK{Version} | OpMismatch{current Version} | OpNotFound   (TTL > 0: CompareAndSwapWithTTL; TTL < 0: OpError)
+//   OpCAD     -> OpOK | OpMismatch{current Version} | OpNotFound
+//   OpSetTTL  -> OpOK{Version} | OpError (invalid ttl)
+//   OpTouch   -> OpOK{Value, Version, TTL just set} | OpNotFound | OpError (invalid ttl)   (the one OpOK that carries Value and TTL; every other OpOK carries only Version)
+//   OpPing    -> OpPong echoing Value
+//   invalid key          -> OpError with the error text; connection stays open. OpKeys and OpPing skip key validation (a prefix may be empty or partial); every other op validates.
+//   reply op as request  -> OpError; connection stays open
+//   unknown op byte      -> one OpError, then close (the stream can't be trusted)
+//   oversized frame      -> close (optionally after one OpError)
+// Requests on one connection are handled in order; each store call gets context.Background() for now.
 ```
 
-Add a CRC32 checksum to every record. `Open` now scans the log:
+- `wire.Server{Store, Logger}` and `Serve`
+- A per-connection loop: ReadFrame, dispatch, WriteFrame
+- The reply table above, including error mapping with errors.Is
 
-- **Torn tail:** the final record is incomplete or fails its checksum, or the file ends in zeros or garbage. That's what a crash mid-write looks like. Truncate the file back to the last good record and carry on.
-- **Corruption:** a bad record with good records after it. Return an error matching `ErrCorrupt` and **don't modify the file**. Someone needs to look at it.
+Decisions the tests rely on:
+
+- Each request runs with `context.Background()` for now. 3.5 adds shutdown; the HTTP side gets real deadlines in 7.4.
+- `OpKeys` echoes the prefix in `Key`; `OpPing` echoes `Value`. `OpKeyList` has an empty `Value` for no keys.
+- `OpKeys` and `OpPing` skip key validation (a prefix may be empty or partial). Every other op validates the key and answers `OpError` for a bad one.
+- `OpTouch` is the one `OpOK` that carries `Value` and `TTL` (the ttl just set) as well as `Version`; every other `OpOK` carries only `Version`.
+- `OpValue.TTL` is the time remaining, rounded up to at least 1ns when an expiry exists, so 0 always means no expiry.
+- `OpCAS` with `TTL < 0` is `OpError`. Fields a request op does not use (a `Value` on `OpGet`) are ignored.
 
 ## The tests check
 
-- The last record cut at every possible byte offset: opens fine, 4 of 5 records come back, the file is truncated to exactly the last good boundary, and new appends land after it.
-- A flipped byte inside the last record is treated as a torn tail.
-- A flipped byte in a middle record is `ErrCorrupt`, and the file is untouched.
-- Flipping each bit of a record in turn never produces a record that differs from what was written. The checksum has to cover the length too.
-- 4 KiB of zeros after the last record must not turn into phantom empty records. (CRC32 of nothing is 0.)
-- A garbage length of `0xffffffff` doesn't allocate gigabytes.
-- Empty records survive a reopen.
+- Each row of the reply table through a raw net.Conn with WriteFrame/ReadFrame, including Version and TTL fields on OpValue and OpOK
+- OpCAS with TTL 5s creates the key with an expiry; a following OpGet reports TTL remaining > 0
+- OpTouch's OpOK carries Value, Version and the TTL just set; OpSet's OpOK carries only Version (Value empty, TTL 0)
+- OpKeyList for 0, 1 and 1000 keys; the list is sorted; an empty prefix lists all
+- Invalid key gets OpError with text containing `invalid key` and the next request on the same connection works
+- A reply op sent as a request gets OpError and the connection stays open
+- Unknown op 0x7f: one OpError then EOF on the next read
+- A frame with a 9 MiB value: the connection closes
+- 100 requests written in one Write get 100 replies in order
+- 40 concurrent clients doing Set/Get on their own keys never see another client's key in a reply
+- A fake store.Store whose Get blocks on one connection doesn't delay another connection
+- Serve returns nil after the listener closes; no goroutines leak
+- OpKeys with an invalid prefix such as `a b` is served (OpKeyList, possibly empty), not OpError; OpGet with that key is OpError
+
+## Uses
+
+- Accept loop (built in 3.1 · Loopback)
+- KV Frame (built in 2.2 · Frame)
+- Memory store (built in 1.1 · Register File)
+- CAS (built in 1.3 · Versions)
+- Expiry (built in 1.4 · Decay)
+
+## In the wild
+
+A Redis server's command dispatch; net/rpc's server loop
 
 ## New in Go
 
-`hash/crc32` · `File.Truncate` · `io.SectionReader` / `ReadAt` · reasoning about crash states
+request/reply loops · switch on typed constants · mapping errors to replies with errors.Is · interfaces as injection points (a fake Store in tests)
+
+Standard library: `net`, `io`, `errors`, `strings`, `log/slog`

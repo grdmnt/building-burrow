@@ -1,44 +1,54 @@
-# 4.3 · Switchboard
+# 4.3 · Parity Bits
 
-A router, so handlers stop being one giant switch, and the KV API on top.
+Disks and crashes produce torn and damaged records. Detect them instead of trusting the bytes, and while you are indexing the log, expose `Len` and `Truncate(n)`: Raft will cut the log on conflict in 10.6.
 
 ## Build
 
 ```go
-type Router struct { /* yours */ }
-func NewRouter() *Router
-func (r *Router) Handle(pattern string, h Handler)
-func (r *Router) HandleFunc(pattern string, f func(*ResponseWriter, *Request))
-func (r *Router) ServeHTTP(w *ResponseWriter, req *Request)
+// wal/wal.go additions
+var ErrCorrupt = errors.New("wal: corrupt")
 
-func (r *Request) PathValue(name string) string // "" if absent
+// On disk each wire Record's payload is now: crc32 (IEEE, big-endian, over rec) | rec.
+// That is why MaxRecordSize is wire.MaxRecordSize - 4: the record at the limit still fits.
+// A payload shorter than 4 bytes, a zero length, or a checksum mismatch is a bad record.
+// Open scans the whole log:
+//   torn tail  - the last record is bad or incomplete, or the file ends in zeros/garbage:
+//                truncate back to the last good record and continue.
+//   corruption - a bad record followed by good records: return ErrCorrupt, file untouched.
 
-// KVRoutes mounts GET, PUT and DELETE /v1/kv/{key} backed by st.
-func KVRoutes(r *Router, st store.Store)
+func (l *Log) Len() int               // number of records currently in the log
+func (l *Log) Truncate(n int) error    // keep the first n records, discard the rest, fsync; n > Len is an error
 ```
 
-Patterns: `"[METHOD ]/path/with/{wildcards}"`.
+- CRC32 inside each record payload; verify on read
+- Open scans, classifies torn tail vs corruption, repairs the tail
+- `Len` and `Truncate(n)`, maintaining a record index (offsets) built during the scan
 
-- No method means any method. `GET` also matches `HEAD`.
-- `{name}` matches one non-empty segment; `{name...}` (last only) matches the rest, slashes included, possibly empty.
-- Split the path on `/`, then percent-decode each segment, so `%2F` stays inside a key. A bad escape is 400.
-- The most specific pattern wins (literal beats wildcard), regardless of registration order.
-- Path matches but method doesn't: 405 with `Allow` listing the methods, sorted, `HEAD` included when `GET` is.
-- Invalid or duplicate patterns panic at registration.
+Decisions the tests rely on:
 
-KV API: `GET` returns 200 with `Content-Type: application/octet-stream` or 404. `PUT` stores the body (empty is fine), returns 204. `DELETE` returns 204 or 404. Invalid key: 400 with the error text. Body over 1 MiB: 413.
+- The CRC is IEEE over `rec`, stored big-endian in the 4 bytes before `rec`, inside the record payload.
+- `Len` counts only good records; `Open` repairs the tail before `Len` is computed. `Truncate(n)` with `n < 0` or `n > Len()` is an error.
 
 ## The tests check
 
-Every rule above through a real HTTP client, including 2 MiB uploads, NUL bytes in values, and 7 kinds of bad pattern.
+- The last of 5 records cut at every possible byte offset: Open succeeds, 4 records come back, the file is truncated to exactly the last good boundary, and new appends land after it
+- A flipped byte inside the last record is treated as a torn tail; a flipped byte in a middle record is ErrCorrupt and the file bytes are unchanged
+- Flipping each bit of a 64-byte record in turn never yields a record that differs from what was written (length bits included)
+- 4 KiB of zeros after the last record do not become phantom empty records; an empty record (zero-length rec, 4-byte payload) survives a reopen
+- A garbage length of 0xFFFFFFFF doesn't allocate gigabytes (AllocsPerRun / time bound)
+- Len counts records after Open, Append and Truncate; Truncate(3) of 5 leaves exactly 3 in Records and on disk after reopen; Truncate(0) empties; Truncate(Len+1) errors; appends after Truncate are visible
+- Truncate is durable: a child process truncates, prints `done`, and is SIGKILLed; the parent sees exactly n records
 
-## Try it
+## Uses
 
-```bash
-curl -X PUT --data hello localhost:8080/v1/kv/greeting
-curl -i localhost:8080/v1/kv/greeting
-```
+- WAL (built in 4.1 · Write-Ahead Log)
+
+## In the wild
+
+etcd's wal records carry a CRC; Kafka segments; SQLite's WAL frames have checksums; Raft's log truncation on AppendEntries conflict (section 5.3)
 
 ## New in Go
 
-methods on function types · the adapter pattern · `net/url.PathUnescape` · `slices.Compare` for ranking
+hash/crc32 · File.Truncate · classifying failure modes · indexes built on scan
+
+Standard library: `hash/crc32`, `os`, `io`

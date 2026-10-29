@@ -1,34 +1,43 @@
-# 1.2 · Bus Interface
+# 1.2 · Arbiter
 
-Define the contract every storage engine in Burrow will satisfy, and meet the curriculum's conformance suite.
+Make the store safe for many goroutines. The network server in chapter 3 will have dozens of connections hitting one store; this level is where the race detector teaches you what that means.
 
 ## Build
 
 ```go
-// store/store.go
-type Store interface {
-	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, value []byte) error
-	Delete(ctx context.Context, key string) error
-	Keys(ctx context.Context, prefix string) ([]string, error)
-}
-
-// Add to Memory:
-func (m *Memory) Keys(ctx context.Context, prefix string) ([]string, error)
+// No new exported API. Memory must be safe for concurrent use by any number of goroutines.
+// Two valid designs, both pass:
+//   (a) a sync.RWMutex inside Memory, locked inside methods, never by callers;
+//   (b) one goroutine owns the map and methods send it requests over a channel (an OTP-style actor).
+// This level installs store/storetest.RunConcurrent.
 ```
 
-`Keys` returns every key starting with `prefix`, **sorted by byte order**. An empty prefix means all keys. No matches means an empty (or nil) slice and a nil error.
-
-This level installs a provided package, `store/storetest`. It's a conformance suite you'll run against every engine you build (the durable store in Chapter 3 runs it too). Don't edit it; `burrow done` checks it's unchanged.
+- Make every Memory method safe under concurrent use
+- Pass `storetest.RunConcurrent` under `-race`
+- Try removing the protection and watch the race detector catch you
 
 ## The tests check
 
-- Compile-time: `*Memory` satisfies `store.Store`, and `store.Store` has every method the suite needs.
-- The full `storetest.Run` suite against `NewMemory()`.
-- `Keys` with prefixes that are keys themselves, prefixes of prefixes, Unicode, no matches.
-- `Keys` returns a snapshot: later writes don't change a slice you already returned.
-- 1000 keys inserted in reverse come back sorted.
+- Runs only under the race detector (testkit.RequireRace)
+- 32 goroutines writing disjoint keys 1000 times each: every final value is right
+- Mixed hammer: 16 goroutines doing Set/Get/Delete/Keys over 32 hot keys for 200 ms; no panics, no races
+- Len and Keys called continuously while 8 writers run: Len never exceeds the key count and Keys stays sorted
+- Readers only ever see whole values: a writer alternates two 64 KiB values while readers check every read is exactly one of them
+
+## Try it
+
+Remove your lock and run `burrow test` to watch the race detector catch you.
+
+## Uses
+
+- Memory store (built in 1.1 · Register File)
+
+## In the wild
+
+go test -race (ThreadSanitizer); sync.Map exists for a narrow case (append-only caches) and is not what you want here
 
 ## New in Go
 
-interfaces (satisfied implicitly) · compile-time assertions `var _ I = (*T)(nil)` · the `slices` package · test helpers with `t.Helper()`
+goroutines · sync.WaitGroup · sync.RWMutex · data races · the race detector · check-then-act · channels as an alternative to locks
+
+Standard library: `sync`, `sync/atomic`

@@ -19,6 +19,7 @@ const helpText = `burrow · learn Go by building a distributed key-value store
   burrow                  dashboard: progress and what to do next
   burrow map              the chapter tech tree
   burrow list [chapter]   every level and its state
+  burrow parts            the parts you've built and where each one plugs in
   burrow show [level]     the level's spec (defaults to the current level)
 
   burrow start <level>    unlock a level: installs its tests into your code
@@ -70,6 +71,8 @@ func run(args []string) error {
 		return cmdMap(w)
 	case "list", "ls":
 		return cmdList(w, args)
+	case "parts", "inventory":
+		return cmdParts(w, args)
 	case "show":
 		return cmdShow(w, args)
 	case "start":
@@ -120,6 +123,8 @@ func cmdStatus(w *world) error {
 			"",
 			inline(l.Brief),
 			"",
+			gray("builds ") + amber(l.Unlock) + "   " + pips(l.Difficulty),
+			gray("uses   ") + ifs(len(l.Consumes) == 0, gray("nothing yet: this is a fresh start")) + usesLine(w, l),
 			gray("Hints revealed: ") + fmt.Sprintf("%d/%d", w.prog.Hints[l.ID], len(l.Hints)) +
 				ifs(!w.cur.hasTests(l), "   "+amber("tests not written yet")),
 		}
@@ -203,7 +208,7 @@ func cmdList(w *world, args []string) error {
 			if s == stDone {
 				tag = faint("  → ") + amber(l.Unlock)
 			}
-			fmt.Println("      " + stateGlyph(s) + " " + gray(padRight(l.ID, 5)) + title + tag)
+			fmt.Println("      " + stateGlyph(s) + " " + gray(padRight(l.ID, 5)) + pips(l.Difficulty) + " " + title + tag)
 		}
 		fmt.Println()
 	}
@@ -235,7 +240,8 @@ func cmdShow(w *world, args []string) error {
 	default:
 		status = gray("locked: " + w.lockReason(l))
 	}
-	head := "\n  " + gray(chapterLabel(l.ch)+" · "+l.ch.Name) + gray("  ·  ") + status + gray("  ·  produces ") + amber(l.Unlock)
+	head := "\n  " + gray(chapterLabel(l.ch)+" · "+l.ch.Name) + gray("  ·  ") + status + gray("  ·  ") + pips(l.Difficulty) +
+		"\n  " + gray("builds ") + amber(bold(l.Unlock)) + ifs(len(l.Consumes) > 0, gray("   from ")+usesLine(w, l))
 	body := renderMarkdown(string(src))
 	foot := "\n" + rule("") + "\n  " + gray("Hints: ") + fmt.Sprintf("%d/%d revealed", w.prog.Hints[l.ID], len(l.Hints)) + gray("  ·  burrow hint") + "\n"
 	page(head + "\n\n" + body + "\n" + foot)
@@ -305,6 +311,11 @@ func startLevel(w *world, l *Level, force bool) error {
 	fmt.Println()
 	for _, line := range wrapVisible(inline(l.Brief), termWidth-6) {
 		fmt.Println("    " + line)
+	}
+	fmt.Println()
+	fmt.Println("    " + gray("builds ") + amber(bold(l.Unlock)) + "   " + pips(l.Difficulty))
+	if u := usesLine(w, l); u != "" {
+		fmt.Println("    " + gray("uses   ") + u)
 	}
 	fmt.Println()
 	for _, f := range added {
@@ -556,6 +567,13 @@ func complete(w *world, l *Level) error {
 	fmt.Println()
 	sparkle(min(termWidth-2, 64), amber)
 	lines := []string{gray("you built ") + amber(bold(l.Unlock))}
+	if cons := w.cur.consumers(l.Unlock); len(cons) > 0 {
+		var ids []string
+		for _, c := range cons {
+			ids = append(ids, c.ID+" "+c.Title)
+		}
+		lines = append(lines, gray("it plugs into: ")+strings.Join(ids, gray(", ")))
+	}
 	if !chWasDone && w.chapterDone(l.ch) {
 		lines = append(lines, "", green(bold("Chapter complete: "+l.ch.Name)))
 	}

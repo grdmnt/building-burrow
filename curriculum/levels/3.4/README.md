@@ -1,27 +1,46 @@
-# 3.4 · Overclock
+# 3.4 · Deadlines
 
-fsync is slow. Let many concurrent appends share one, without ever acknowledging data that isn't on disk.
+A blocking network call has to obey its context. Deadlines, cancels mid-call, late replies and a server that hangs up are all cases the client must survive without ever handing one caller another caller's reply.
 
 ## Build
 
 ```go
-// WithSyncFunc replaces the fsync done after appends (default: (*os.File).Sync).
-func WithSyncFunc(fn func(f *os.File) error) Option
-
-// Syncs reports how many times the sync function has run for appends.
-func (l *Log) Syncs() uint64
+// No new exported API. Behaviour added to every Client method:
+//   - a call past ctx's deadline returns within a second with an error matching context.DeadlineExceeded
+//   - cancelling ctx mid-call returns context.Canceled promptly
+//   - after any mid-call error the connection is closed and the next call redials
+//   - Dial honours its ctx
+// burrowctl's -timeout flag now actually bounds each command.
 ```
 
-Group commit: one writer goroutine collects waiting appends, writes them together, syncs once, then wakes every waiter.
+- Set the connection deadline from ctx.Deadline() for the duration of each call
+- `context.AfterFunc(ctx, ...)` to interrupt a blocked read on cancel
+- Discard and redial after any mid-call error; report ctx.Err() when the context caused it
+
+Decisions the tests rely on:
+
+- After a mid-call failure the client returns `ctx.Err()` if the context is done, otherwise the network error. Redialing is lazy: the next call does it.
 
 ## The tests check
 
-- Sequential appends: each one returns only after a sync covering its bytes. 30 appends, 30 syncs.
-- 100 goroutines × 20 appends with a 2ms sync: at most 500 syncs and under 2 seconds. One sync per append would take 4.
-- **A failed sync is sticky:** every append in the failed batch, and every append after, returns that error. You can't know what reached the disk.
-- `Close` with appends in flight: nothing hangs, appends either succeed or return `ErrClosed`, and everything acknowledged is in the log afterwards. No goroutines leak.
-- Two benchmarks to compare: `go test -bench=L3_4 -run=^$ ./wal`.
+- A fake server that sleeps 5 s: Get with a 50 ms deadline returns within 1 s with errors.Is(err, context.DeadlineExceeded)
+- Cancel after 50 ms mid-call: returns within 1 s with context.Canceled
+- No stale replies: the first call times out, its reply arrives 300 ms later; the next call must get its own value and the fake server has seen a second connection
+- The server hangs up mid-call: that call errors, the next call redials and succeeds
+- Dial with an already-cancelled ctx fails without connecting; Dial to a dead address fails within 2 s
+- No goroutines leak across 100 timed-out calls (testkit.NoLeaks)
+- burrowctl -timeout 50ms against the slow fake exits 1 and prints `timeout`
+
+## Uses
+
+- Frame client (built in 3.3 · Remote Store)
+
+## In the wild
+
+net/http's Transport does exactly this per request; database/sql drivers and gRPC clients too. context.AfterFunc (Go 1.21) replaced a goroutine-per-call idiom
 
 ## New in Go
 
-channels of request structs · reply channels · batching with a non-blocking drain · benchmarks and `b.Loop` · profiling with `-cpuprofile`
+net.Conn.SetDeadline · context.AfterFunc · net.Error.Timeout · errors.Is across layers · connection state machines
+
+Standard library: `net`, `context`, `time`, `errors`

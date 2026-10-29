@@ -41,6 +41,11 @@ type Level struct {
 	Hints  []string `json:"hints"`
 	Unlock string   `json:"unlock"`
 
+	Idea       string   `json:"idea"`
+	Difficulty int      `json:"difficulty"`
+	Consumes   []string `json:"consumes"`
+	Wild       string   `json:"wild"`
+
 	ch  *Chapter
 	idx int
 }
@@ -234,10 +239,33 @@ func (w *world) available() []*Level {
 }
 
 func chapterLabel(ch *Chapter) string {
-	if strings.HasPrefix(ch.Key, "S") {
-		return "Side " + strings.TrimPrefix(ch.Key, "S")
+	if ch.Optional {
+		return "Opt " + ch.Key
 	}
 	return "Ch " + ch.Key
+}
+
+// producer returns the level that builds the named part.
+func (c *Curriculum) producer(part string) *Level {
+	for _, l := range c.flat {
+		if l.Unlock == part {
+			return l
+		}
+	}
+	return nil
+}
+
+// consumers returns the levels that use the named part.
+func (c *Curriculum) consumers(part string) []*Level {
+	var out []*Level
+	for _, l := range c.flat {
+		for _, p := range l.Consumes {
+			if p == part {
+				out = append(out, l)
+			}
+		}
+	}
+	return out
 }
 
 // ---------- level files ----------

@@ -1,20 +1,53 @@
-# 8.2 · History Checker
+# 8.2 · Fan-out
 
-Record what clients saw and prove the cluster didn't lie.
-
-> **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/8.2/files/`, matching the earlier chapters.
+An in-process broker on channels that tells subscribers when keys change, without letting a slow reader stall writes. Expiry is an event too: the `OnEvict` hook from 1.5 feeds the broker.
 
 ## Build
 
-- A load generator that logs each operation with start time, end time and result
-- A checker: every acknowledged write is readable later, and reads of a key never go back in time
+```go
+package watch
+
+type Event struct { ID uint64; Type string /* put|delete|expire */; Entry store.Entry }
+type Broker struct { /* yours */ }
+func NewBroker(buffer int) *Broker
+func (b *Broker) Publish(ev Event)
+func (b *Broker) Subscribe(prefix string) (<-chan Event, func()) // channel closed and unsubscribed if the subscriber falls `buffer` behind
+
+// Wrap decorates any store.Store so every successful mutation publishes; pass its OnEvict
+// method as store.WithOnEvict so expiries publish too.
+func Wrap(st store.Store, b *Broker) *Store
+func (s *Store) OnEvict(e store.Entry)
+```
+
+- `Broker` with buffered subscriber channels and select/default
+- `Wrap` decorating a Store
+- Expire events via OnEvict
+
+> **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/8.2/files/`, matching the earlier chapters.
 
 ## Pass when
 
-A clean run passes. Deliberately serving reads from followers makes the checker fail and name the bad operation.
+With one subscriber that never reads, 1,000 writes take no longer than with none and that subscriber is dropped; fast subscribers see every event in order with increasing IDs, including expiries.
+
+The suite will cover:
+
+- Ordering and completeness for 3 fast subscribers
+- A stuck subscriber is dropped and writers are not delayed (timed)
+- Expiry on a FakeClock produces an expire event with the entry
+- Unsubscribe twice is safe; publishing after all unsubscribed is fine
+- storetest.Run passes through Wrap
+
+## Uses
+
+- Janitor (built in 1.5 · Janitor)
+- Memory store (built in 1.1 · Register File)
+
+## In the wild
+
+NATS core pub/sub semantics; Go's own event bus idiom; Redis keyspace notifications
 
 ## New in Go
 
-concurrent clients · operation histories · consistency checking
+buffered channels · select with default · unsubscribe functions · decorator over an interface · sync.Once
 
-Standard library: `encoding/json` · `time` · `sync` · `slices`
+Standard library: `sync`, `context`, `strings`
