@@ -238,7 +238,7 @@ func cmdShow(w *world, args []string) error {
 	head := "\n  " + gray(chapterLabel(l.ch)+" · "+l.ch.Name) + gray("  ·  ") + status + gray("  ·  produces ") + amber(l.Unlock)
 	body := renderMarkdown(string(src))
 	foot := "\n" + rule("") + "\n  " + gray("Hints: ") + fmt.Sprintf("%d/%d revealed", w.prog.Hints[l.ID], len(l.Hints)) + gray("  ·  burrow hint") + "\n"
-	page(head + "\n" + body + "\n" + foot)
+	page(head + "\n\n" + body + "\n" + foot)
 	return nil
 }
 
