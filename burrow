@@ -1,0 +1,11 @@
+#!/bin/sh
+# Builds the curriculum CLI (once, then whenever its source changes) and runs it.
+set -e
+root="$(cd "$(dirname "$0")" && pwd)"
+bin="$root/.burrow/bin/burrow"
+src="$root/tools/burrow"
+if [ ! -x "$bin" ] || [ -n "$(find "$src" -name '*.go' -newer "$bin" 2>/dev/null | head -n 1)" ]; then
+  mkdir -p "$root/.burrow/bin"
+  (cd "$src" && go build -o "$bin" .)
+fi
+BURROW_ROOT="$root" exec "$bin" "$@"

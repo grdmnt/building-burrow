@@ -1,0 +1,1752 @@
+{
+  "title": "Building Burrow",
+  "chapters": [
+    {
+      "key": "0",
+      "name": "Boot Sector",
+      "optional": false,
+      "needs": [],
+      "line": "Toolchain, modules and the test loop every level uses.",
+      "pos": {
+        "row": 0,
+        "col": 2,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "0.1",
+          "title": "Power On",
+          "brief": "Create the burrow module and a burrowd binary with a testable run() function, proper exit codes and usage text.",
+          "build": [
+            "`go mod init burrow` (already done in this repo)",
+            "`cmd/burrowd/main.go` with `run(args, stdout, stderr) int`",
+            "`version`, `help` and usage errors with the right exit codes"
+          ],
+          "win": "`burrowd version` prints `burrowd 0.1.0` and exits 0; usage mistakes exit 2 with usage on stderr; the built binary behaves the same.",
+          "go": [
+            "modules",
+            "package main",
+            "go run vs go build",
+            "gofmt"
+          ],
+          "pkgs": [
+            "fmt",
+            "os"
+          ],
+          "hints": [
+            "Keep `main` to one line: `os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))`. Everything else lives in `run`, which tests can call.",
+            "A `switch args[0]` handles commands and their flag spellings together: `case \"version\", \"-version\", \"--version\":`.",
+            "Write usage once as a `const` string and print it with `fmt.Fprint(w, usage)` to whichever writer the case calls for."
+          ],
+          "unlock": "burrowd binary"
+        },
+        {
+          "id": "0.2",
+          "title": "Test Bench",
+          "brief": "Learn the testing loop you'll use in every level after this one.",
+          "build": [
+            "`store.ValidateKey(key string) error`",
+            "`var ErrInvalidKey`, wrapped with context using `%w`",
+            "Your own table-driven test in `store/validate_test.go`"
+          ],
+          "win": "25 valid/invalid keys classified correctly, errors wrap ErrInvalidKey, quote the key with %q, and stay short for huge keys.",
+          "go": [
+            "structs",
+            "slices",
+            "error values",
+            "table-driven tests",
+            "subtests"
+          ],
+          "pkgs": [
+            "testing",
+            "errors",
+            "fmt",
+            "unicode"
+          ],
+          "hints": [
+            "`len(s)` counts bytes, which is what the limit is in. `utf8.ValidString` checks encoding.",
+            "`for _, r := range key` walks runes, not bytes. Check `unicode.IsSpace(r) || unicode.IsControl(r)`.",
+            "For long keys, quote only a prefix: `fmt.Errorf(\"%w: %q... is %d bytes\", ErrInvalidKey, key[:20], len(key))`."
+          ],
+          "unlock": "ValidateKey"
+        }
+      ]
+    },
+    {
+      "key": "1",
+      "name": "Memory",
+      "optional": false,
+      "needs": [
+        "0"
+      ],
+      "line": "An in-memory store that stays correct under concurrency.",
+      "pos": {
+        "row": 1,
+        "col": 2,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "1.1",
+          "title": "Register File",
+          "brief": "An in-memory key-value store with Get, Set, Delete and Len that gets missing keys, empty values and shared memory right.",
+          "build": [
+            "`NewMemory()`, `Get`, `Set`, `Delete` (all take `ctx` first), `Len()`",
+            "`var ErrNotFound`",
+            "Copy byte slices on the way in and out"
+          ],
+          "win": "Missing keys return ErrNotFound, empty values exist, no aliasing either way, cancelled contexts change nothing.",
+          "go": [
+            "maps",
+            "pointer receivers",
+            "constructors",
+            "sentinel errors",
+            "slice aliasing"
+          ],
+          "pkgs": [
+            "errors",
+            "bytes"
+          ],
+          "hints": [
+            "Writing to a nil map panics. Make the map in `NewMemory`.",
+            "Slices share backing arrays. `bytes.Clone(v)` or `append([]byte(nil), v...)` makes an independent copy. Careful: `bytes.Clone(nil)` is nil, which is fine for storage but think about what Get returns.",
+            "Check `ctx.Err()` and `ValidateKey` at the top of each method, before touching the map."
+          ],
+          "unlock": "Memory store"
+        },
+        {
+          "id": "1.2",
+          "title": "Bus Interface",
+          "brief": "Define the contract every storage engine in Burrow will satisfy.",
+          "build": [
+            "`type Store interface` with Get, Set, Delete, Keys",
+            "`Memory.Keys(ctx, prefix)`, sorted",
+            "Pass the provided `storetest.Run` suite"
+          ],
+          "win": "Memory satisfies store.Store and passes the full conformance suite.",
+          "go": [
+            "implicit interfaces",
+            "context as first argument",
+            "compile-time assertions",
+            "test helpers"
+          ],
+          "pkgs": [
+            "context",
+            "testing"
+          ],
+          "hints": [
+            "Go interfaces are satisfied implicitly. Put the interface where it's used (here, package store) and keep it small.",
+            "`strings.HasPrefix` plus `slices.Sort` is all Keys needs. Sorting happens after you've collected matches.",
+            "A returned slice is a snapshot if you built it fresh. Don't return anything that points into your map."
+          ],
+          "unlock": "Store interface"
+        },
+        {
+          "id": "1.3",
+          "title": "Arbiter",
+          "brief": "Make the store safe for many goroutines at once.",
+          "build": [
+            "A `sync.RWMutex` in Memory",
+            "`Update(ctx, key, fn)`: atomic read-modify-write",
+            "Pass `storetest.RunConcurrent` under `-race`"
+          ],
+          "win": "Race-free under the hammer, and 10,000 concurrent increments through Update land exactly.",
+          "go": [
+            "goroutines",
+            "sync.WaitGroup",
+            "RWMutex",
+            "data races",
+            "race detector"
+          ],
+          "pkgs": [
+            "sync",
+            "sync/atomic"
+          ],
+          "hints": [
+            "Lock inside methods, not in callers. A zero-value `sync.RWMutex` is ready to use; never copy a struct containing one.",
+            "Update holds the write lock for the whole read-call-write. That's what makes it atomic, and why fn must never call back into the store.",
+            "Give fn `append([]byte(nil), old...)` and store `append([]byte(nil), result...)`. Copies on both sides."
+          ],
+          "unlock": "Arbiter (RWMutex)"
+        },
+        {
+          "id": "1.4",
+          "title": "Decay Timer",
+          "brief": "Keys that expire, and a background janitor you can stop cleanly.",
+          "build": [
+            "Functional options: `WithClock`, `WithSweepInterval`, `WithOnEvict`",
+            "`SetWithTTL`, `TTL`, and expiry everywhere",
+            "A janitor goroutine and `Close()` that stops it"
+          ],
+          "win": "Exact expiry on a fake clock, exactly-once eviction even with racing readers, OnEvict can re-enter the store, and Close leaves no goroutines.",
+          "go": [
+            "time.Time and Duration",
+            "Ticker",
+            "select",
+            "goroutine lifecycle",
+            "injectable clock"
+          ],
+          "pkgs": [
+            "time",
+            "context",
+            "sync"
+          ],
+          "hints": [
+            "Store `expireAt time.Time` per entry (zero = never). Expired means `!now.Before(expireAt)`.",
+            "Exactly-once eviction: whoever deletes the entry under the write lock fires OnEvict. Re-check expiry after taking the lock; someone may have beaten you.",
+            "Collect evicted keys while locked, unlock, then call OnEvict. Close: `close(stop)` once via `sync.Once`, then wait on a `done` channel the janitor closes."
+          ],
+          "unlock": "Janitor"
+        }
+      ]
+    },
+    {
+      "key": "2",
+      "name": "Wire",
+      "optional": false,
+      "needs": [
+        "1"
+      ],
+      "line": "Raw TCP, your own protocol, a client and clean shutdown.",
+      "pos": {
+        "row": 2,
+        "col": 2,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "2.1",
+          "title": "Loopback",
+          "brief": "Your first network server: accept TCP connections and echo the bytes back.",
+          "build": [
+            "`wire.ServeEcho(ln, logger) error`",
+            "One goroutine per connection, `io.Copy(conn, conn)`",
+            "slog lines with `remote` and `bytes` attributes"
+          ],
+          "win": "Echoes 50 concurrent clients and 4 MiB payloads, handles half-close, returns nil when the listener closes.",
+          "go": [
+            "net.Conn as Reader and Writer",
+            "goroutine per connection",
+            "defer Close"
+          ],
+          "pkgs": [
+            "net",
+            "io",
+            "log/slog"
+          ],
+          "hints": [
+            "Accept blocks. `go handle(conn)` or the second client waits forever.",
+            "After `ln.Close()`, Accept returns an error matching `errors.Is(err, net.ErrClosed)`. That's your clean exit.",
+            "`io.Copy` returns the byte count you need for the `bytes` attribute. `slog.New(slog.DiscardHandler)` stands in for a nil logger."
+          ],
+          "unlock": "TCP listener"
+        },
+        {
+          "id": "2.2",
+          "title": "Line Protocol",
+          "brief": "A text protocol so you can drive the store by hand.",
+          "build": [
+            "`wire.ServeLines(ln, st, logger) error`",
+            "SET/GET/DEL/KEYS/PING/QUIT with exact replies",
+            "Error replies, blank lines ignored, 64 KiB line limit"
+          ],
+          "win": "Every command and error reply matches, pipelining and split writes work, long lines get `ERR line too long`.",
+          "go": [
+            "bufio",
+            "string parsing",
+            "switch",
+            "mapping errors to replies"
+          ],
+          "pkgs": [
+            "bufio",
+            "strings",
+            "errors"
+          ],
+          "hints": [
+            "`strings.Cut(line, \" \")` splits the command from the rest; cut the rest again for SET's key and value, so the value keeps its spaces.",
+            "`bufio.Scanner`'s default max token is 64 KiB. When it stops, check `errors.Is(sc.Err(), bufio.ErrTooLong)`.",
+            "Wrap the conn in a `bufio.Writer` and `Flush` after each command's reply, not after each line of KEYS."
+          ],
+          "unlock": "Line codec"
+        },
+        {
+          "id": "2.3",
+          "title": "Framing",
+          "brief": "Text breaks on binary values. Replace it with length-prefixed frames.",
+          "build": [
+            "`Op` constants and `Op.String()`",
+            "`WriteFrame` / `ReadFrame` with the exact byte layout",
+            "Size limits checked before allocating"
+          ],
+          "win": "Golden bytes match, round trips survive slow readers, EOF rules are exact, oversized lengths don't allocate, and the fuzzer finds nothing.",
+          "go": [
+            "byte layouts",
+            "io.ReadFull",
+            "defensive limits",
+            "fuzz tests"
+          ],
+          "pkgs": [
+            "encoding/binary",
+            "io",
+            "bytes",
+            "testing"
+          ],
+          "hints": [
+            "`conn.Read` can return fewer bytes than asked. `io.ReadFull` loops for you, and turns a mid-read EOF into `io.ErrUnexpectedEOF`.",
+            "Read the op byte separately: EOF there is a clean `io.EOF`; EOF anywhere after is unexpected.",
+            "Build the frame in one slice with `binary.BigEndian.AppendUint32` and write it once; compare `n` to `len(buf)` for `io.ErrShortWrite`."
+          ],
+          "unlock": "Frame codec"
+        },
+        {
+          "id": "2.4",
+          "title": "Client",
+          "brief": "A Go client package and a CLI, so you stop hand-typing frames.",
+          "build": [
+            "`wire.Server` serving frames from a Store",
+            "`client` package: Dial, Get/Set/Delete/Ping, ServerError, ErrClosed",
+            "`cmd/burrowctl` with `-addr` and `-timeout`"
+          ],
+          "win": "Deadlines and cancels return the context's error promptly, a timed-out connection is never reused, and 50 goroutines can share one client.",
+          "go": [
+            "package API design",
+            "deadlines from context",
+            "flag subcommands",
+            "exit codes"
+          ],
+          "pkgs": [
+            "net",
+            "time",
+            "context",
+            "flag",
+            "os"
+          ],
+          "hints": [
+            "Set the conn deadline from `ctx.Deadline()`, and use `context.AfterFunc(ctx, func(){ conn.SetDeadline(time.Unix(1,0)) })` so a cancel interrupts a blocked read.",
+            "When a call fails, check `ctx.Err()` first. The conn deadline can fire a hair before the context's timer, so also check whether the deadline has passed.",
+            "Any error mid-call leaves the stream out of sync: close the conn, set it to nil, and dial again on the next call. A mutex around each call keeps replies paired with requests."
+          ],
+          "unlock": "burrowctl"
+        },
+        {
+          "id": "2.5",
+          "title": "Power Down",
+          "brief": "Stop the server on Ctrl-C without dropping requests in flight.",
+          "build": [
+            "`Server.Shutdown(ctx)` and `ErrServerClosed`",
+            "Track connections as idle or busy",
+            "`burrowd serve` with signal handling"
+          ],
+          "win": "Idle connections close at once, in-flight requests finish, the context deadline force-closes, and the binary exits 0 on SIGINT and SIGTERM.",
+          "go": [
+            "signal handling",
+            "cancellation fan-out",
+            "shutdown ordering",
+            "net.ErrClosed"
+          ],
+          "pkgs": [
+            "os/signal",
+            "syscall",
+            "context",
+            "sync",
+            "errors"
+          ],
+          "hints": [
+            "Keep a set of connections and a busy flag on each, guarded by a mutex. Busy from a full request read until its reply is written.",
+            "Shutdown loop: close listeners, then every few ms close idle conns, until a WaitGroup of handlers is done or ctx ends.",
+            "`signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)` gives you a context that's cancelled on Ctrl-C."
+          ],
+          "unlock": "Shutdown sequencer"
+        }
+      ]
+    },
+    {
+      "key": "3",
+      "name": "Persistence",
+      "optional": false,
+      "needs": [
+        "2"
+      ],
+      "line": "A write-ahead log that survives kill -9. Needed before Consensus and the Service Bus branch, so take it whenever you like.",
+      "pos": {
+        "row": 3,
+        "col": 3,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "3.1",
+          "title": "Write-Ahead Log",
+          "brief": "Survive a restart by logging every write before applying it.",
+          "build": [
+            "`wal.Open`, `Append`, `Replay`, `Close`",
+            "`durable.Open(dir)`: Memory + log, replayed on open",
+            "Only acknowledge after the record is synced"
+          ],
+          "win": "Durable passes both conformance suites and every acknowledged write survives kill -9.",
+          "go": [
+            "files",
+            "fsync semantics",
+            "struct embedding",
+            "replay"
+          ],
+          "pkgs": [
+            "os",
+            "bufio",
+            "io"
+          ],
+          "hints": [
+            "Open with `os.O_RDWR|os.O_CREATE` and track your append offset, or use `O_APPEND`. Replay can read with `ReadAt` so it doesn't move the write position.",
+            "Validate and check existence before appending, so rejected writes never reach the log.",
+            "Encode each change as a `wire.Frame` (OpSet/OpDelete) inside the record. You already have a tested codec."
+          ],
+          "unlock": "WAL"
+        },
+        {
+          "id": "3.2",
+          "title": "Parity Bits",
+          "brief": "Detect torn and corrupt records instead of trusting the bytes on disk.",
+          "build": [
+            "A CRC32 on every record, covering its length",
+            "Torn tails truncated on Open",
+            "Mid-log corruption reported as ErrCorrupt"
+          ],
+          "win": "Every truncation and bit flip is handled: torn tails repaired, real corruption refused, no phantom records from zeros.",
+          "go": [
+            "checksums",
+            "partial writes",
+            "File.Truncate",
+            "corruption tests"
+          ],
+          "pkgs": [
+            "hash/crc32",
+            "os"
+          ],
+          "hints": [
+            "Checksum the length bytes and the payload together. Then an all-zero header fails the check.",
+            "A bad record is a torn tail if it reaches the end of the file, or everything after it is zeros. Otherwise it's corruption.",
+            "Check the length against `MaxRecordSize` and the remaining file size before allocating."
+          ],
+          "unlock": "CRC guard"
+        },
+        {
+          "id": "3.3",
+          "title": "Compaction",
+          "brief": "Stop the log growing forever with snapshots and atomic file swaps.",
+          "build": [
+            "`Store.Snapshot()`",
+            "Write tmp, fsync, rename, then reset the log",
+            "Load snapshot then replay log on Open"
+          ],
+          "win": "The log shrinks, every crash point recovers, and a damaged snapshot fails loudly.",
+          "go": [
+            "atomic rename",
+            "crash-safety reasoning",
+            "directory sync"
+          ],
+          "pkgs": [
+            "os",
+            "path/filepath",
+            "encoding/gob"
+          ],
+          "hints": [
+            "Rename within a directory is atomic on POSIX. To make the rename itself durable, open the directory and `Sync` it.",
+            "Replaying the old log on top of a newer snapshot is safe because sets and deletes are idempotent in order.",
+            "Prefix the snapshot with a CRC32 of its contents, and refuse to open if it doesn't match."
+          ],
+          "unlock": "Snapshotter"
+        },
+        {
+          "id": "3.4",
+          "title": "Overclock",
+          "brief": "Measure, profile, then batch fsyncs so writes stop queueing behind each other.",
+          "build": [
+            "`WithSyncFunc` option and `Syncs()` counter",
+            "A writer goroutine that batches waiting appends",
+            "Sticky sync failures and a clean Close"
+          ],
+          "win": "Concurrent appends share syncs (≤500 syncs for 2000 appends), each append still waits for its own sync, and failures poison the log.",
+          "go": [
+            "benchmarks",
+            "pprof",
+            "channels of channels",
+            "batching",
+            "backpressure"
+          ],
+          "pkgs": [
+            "testing",
+            "runtime/pprof",
+            "sync"
+          ],
+          "hints": [
+            "Each Append sends `request{rec, done chan error}` to the writer and waits on `done`.",
+            "Writer loop: block for one request, then drain more without blocking (`select` with `default`), write them all, sync once, reply to all.",
+            "Once a sync fails, remember the error and return it for every later batch without writing."
+          ],
+          "unlock": "Group commit"
+        }
+      ]
+    },
+    {
+      "key": "4",
+      "name": "HTTP by Hand",
+      "optional": false,
+      "needs": [
+        "2"
+      ],
+      "line": "Write an HTTP/1.1 server yourself on raw TCP. No net/http outside tests.",
+      "pos": {
+        "row": 3,
+        "col": 1,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "4.1",
+          "title": "Request Line",
+          "brief": "Speak HTTP over a raw socket and see exactly what a browser or curl sends you.",
+          "build": [
+            "`ReadRequest(br)`, `Request`, `Header`",
+            "Error sentinels for 400 / 505 / 431",
+            "A Server answering everything with the hello page"
+          ],
+          "win": "Parses everything valid, rejects 16 kinds of malformed request, enforces size limits, and serves net/http's client.",
+          "go": [
+            "bufio.Reader",
+            "CRLF line endings",
+            "strings.Cut",
+            "your own types"
+          ],
+          "pkgs": [
+            "net",
+            "bufio",
+            "strings",
+            "log/slog"
+          ],
+          "hints": [
+            "Count bytes as you read lines and stop at 8 KiB. `br.ReadSlice('\\n')` returns `bufio.ErrBufferFull` for long lines: keep appending.",
+            "`strings.Split(line, \" \")` must give exactly three non-empty parts; a double space gives an empty one.",
+            "Header names are tokens: letters, digits and ``!#$%&'*+-.^_`|~``. A space before the colon makes the name invalid."
+          ],
+          "unlock": "HTTP parser"
+        },
+        {
+          "id": "4.2",
+          "title": "Status and Body",
+          "brief": "Read request bodies and write proper responses.",
+          "build": [
+            "`Handler`, `HandlerFunc`, `ResponseWriter`",
+            "Request bodies by Content-Length with limits",
+            "Correct heads for 204, 304 and HEAD; panic recovery"
+          ],
+          "win": "net/http parses every response you write, bad lengths are 400, oversized 413, truncated bodies error, and no header injection gets through.",
+          "go": [
+            "io.LimitReader",
+            "status line format",
+            "writing headers once",
+            "error responses"
+          ],
+          "pkgs": [
+            "io",
+            "strconv",
+            "time",
+            "fmt"
+          ],
+          "hints": [
+            "Buffer the body in a `bytes.Buffer` and write the head after the handler returns, when you know the length.",
+            "Snapshot the headers when WriteHeader is called; later changes don't count.",
+            "`io.LimitReader` reports EOF when the underlying reader does. Write your own body reader that turns an early EOF into `io.ErrUnexpectedEOF`."
+          ],
+          "unlock": "Response writer"
+        },
+        {
+          "id": "4.3",
+          "title": "Switchboard",
+          "brief": "Your own router, so handlers stop being one giant switch.",
+          "build": [
+            "`Router` with method + path patterns and wildcards",
+            "404, 405 with Allow, specificity ranking",
+            "`KVRoutes` on a Store"
+          ],
+          "win": "Routing, percent-decoding, specificity and the KV API all behave like Go 1.22's ServeMux.",
+          "go": [
+            "methods on function types",
+            "adapters",
+            "path matching",
+            "closures"
+          ],
+          "pkgs": [
+            "strings",
+            "slices"
+          ],
+          "hints": [
+            "Parse patterns once at registration into segments: literal, `{name}`, or `{name...}`.",
+            "Score a match per segment (literal 2, wildcard 1, rest 0) and compare scores with `slices.Compare`.",
+            "Collect methods of routes whose path matched but method didn't: that's your Allow header."
+          ],
+          "unlock": "Router"
+        },
+        {
+          "id": "4.4",
+          "title": "Keep-Alive",
+          "brief": "Serve many requests over one connection, and close idle ones.",
+          "build": [
+            "A request loop per connection",
+            "Idle, header and per-connection limits",
+            "Drain unread bodies"
+          ],
+          "win": "Pipelining, Connection rules, drained bodies, and all three timeouts behave like a production server.",
+          "go": [
+            "connection reuse",
+            "read deadlines",
+            "net.Error timeouts"
+          ],
+          "pkgs": [
+            "net",
+            "time",
+            "errors"
+          ],
+          "hints": [
+            "Use `br.Peek(1)` under the idle deadline to wait for the next request, then switch to the header deadline.",
+            "Drain with `io.Copy(io.Discard, io.LimitReader(body, 256<<10))`; if it hit the limit, close.",
+            "Decide `closeAfter` before calling the handler, so the response head can say `Connection: close`."
+          ],
+          "unlock": "Keep-alive loop"
+        },
+        {
+          "id": "4.5",
+          "title": "Streaming",
+          "brief": "Send a response before you know how long it is.",
+          "build": [
+            "`Flush()` and automatic chunked responses",
+            "A chunked request-body reader",
+            "`GET /v1/keys` streaming"
+          ],
+          "win": "Data streams before the handler returns, chunked uploads decode, and every malformed case is rejected.",
+          "go": [
+            "chunk framing",
+            "hex lengths",
+            "io.Writer wrappers",
+            "flushing"
+          ],
+          "pkgs": [
+            "bufio",
+            "strconv",
+            "io"
+          ],
+          "hints": [
+            "Once the head is sent with `Transfer-Encoding: chunked`, each Write becomes `%x\\r\\n` + bytes + `\\r\\n`.",
+            "A chunked reader is a small state machine: read size line, read that many bytes, expect CRLF, repeat until size 0, then skip trailers to a blank line.",
+            "Reject sizes with more than 15 hex digits before parsing to avoid overflow."
+          ],
+          "unlock": "Chunked codec"
+        },
+        {
+          "id": "4.6",
+          "title": "Conformance",
+          "brief": "Prove your server speaks real HTTP, then read how net/http does it.",
+          "build": [
+            "`Server.Shutdown(ctx)`",
+            "`Expect: 100-continue`",
+            "Pass differential tests and fuzzing"
+          ],
+          "win": "Your parser agrees with net/http, survives fuzzing, handles 1000 keep-alive requests, and shuts down gracefully.",
+          "go": [
+            "conformance testing",
+            "fuzzing parsers",
+            "reading the standard library"
+          ],
+          "pkgs": [
+            "net/http (tests only)",
+            "testing"
+          ],
+          "hints": [
+            "Reuse the idle/busy tracking from wire.Server. A connection waiting for its next request is idle.",
+            "Keep Request.Path escaped; net/http compares with `URL.EscapedPath()`.",
+            "When a fuzz test fails, Go saves the input under testdata/fuzz. Re-run `go test` to replay it."
+          ],
+          "unlock": "HTTP/1.1 server"
+        }
+      ]
+    },
+    {
+      "key": "5",
+      "name": "net/http",
+      "optional": false,
+      "needs": [
+        "4"
+      ],
+      "line": "Swap your hand-built server for net/http and see what it gives you.",
+      "pos": {
+        "row": 4,
+        "col": 1,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "5.1",
+          "title": "Front Panel",
+          "brief": "Rebuild the Chapter 4 API on net/http and compare how much code disappears.",
+          "build": [
+            "`http.ServeMux` routes: `GET`, `PUT` and `DELETE /v1/kv/{key}`",
+            "Read the key with `r.PathValue(\"key\")`",
+            "JSON errors shaped `{\"error\": \"...\"}`",
+            "Keep your httpraw server around so you can compare the two"
+          ],
+          "win": "The same curl commands from 4.3 work. A wrong method gets 405 with an `Allow` header, and a 2 MB body gets 413.",
+          "go": [
+            "handlers",
+            "method and path patterns",
+            "MaxBytesReader",
+            "JSON encoding"
+          ],
+          "pkgs": [
+            "net/http",
+            "encoding/json",
+            "io"
+          ],
+          "hints": [
+            "`mux.HandleFunc(\"GET /v1/kv/{key}\", h.get)`. Method patterns need Go 1.22 or later.",
+            "Write one `writeJSON(w, status, v)` helper and use it everywhere.",
+            "Set headers before `WriteHeader`. After the first `Write` they're locked, just like in your 4.2 writer."
+          ],
+          "unlock": "HTTP API"
+        },
+        {
+          "id": "5.2",
+          "title": "Signal Chain",
+          "brief": "Logging, request IDs and panic recovery as composable layers.",
+          "build": [
+            "`type Middleware func(http.Handler) http.Handler` and a `chain()` helper",
+            "Request IDs from `crypto/rand`",
+            "A slog access log with status and duration",
+            "Recover from panics with a 500"
+          ],
+          "win": "Every request logs one JSON line with id, method, path, status and duration. A handler that panics returns 500 and the server keeps serving.",
+          "go": [
+            "closures",
+            "decorators",
+            "wrapping interfaces",
+            "context values",
+            "structured logging"
+          ],
+          "pkgs": [
+            "log/slog",
+            "crypto/rand",
+            "encoding/hex",
+            "context"
+          ],
+          "hints": [
+            "To capture the status, embed `http.ResponseWriter` in your own struct and override `WriteHeader`.",
+            "Use an unexported type for context keys: `type ctxKey struct{}`.",
+            "Put recovery outermost so it also catches panics in your other middleware."
+          ],
+          "unlock": "Middleware chain"
+        },
+        {
+          "id": "5.3",
+          "title": "Watchdog",
+          "brief": "Make slow clients and slow disks unable to hang your server.",
+          "build": [
+            "`http.Server` with `ReadHeaderTimeout`, `ReadTimeout`, `WriteTimeout`, `IdleTimeout`",
+            "A per-request deadline in middleware",
+            "Store methods return when `ctx` is done",
+            "`server.Shutdown(ctx)` wired to your signal handling from 2.5"
+          ],
+          "win": "A store with an injected 5 second delay makes requests fail with 503 after your 1 second budget, and the store sees its context cancelled. Ctrl-C drains HTTP and TCP together.",
+          "go": [
+            "context deadlines",
+            "cancellation propagation",
+            "server timeouts",
+            "graceful HTTP shutdown"
+          ],
+          "pkgs": [
+            "net/http",
+            "context",
+            "time"
+          ],
+          "hints": [
+            "A zero-value `http.Server` has no timeouts. A slow client can hold a connection open forever.",
+            "`select { case <-ctx.Done(): return ctx.Err(); case res := <-work: ... }`",
+            "Map `context.DeadlineExceeded` to a status code in exactly one place."
+          ],
+          "unlock": "Deadline guard"
+        },
+        {
+          "id": "5.4",
+          "title": "Test Jig",
+          "brief": "Test handlers end to end without starting servers by hand.",
+          "build": [
+            "Unit tests per handler with `httptest.NewRecorder`",
+            "An integration test through the full middleware chain with `httptest.NewServer`",
+            "A fake Store for error paths"
+          ],
+          "win": "`go test -race ./api/...` covers every route and status code from 5.1 plus the panic and timeout paths, in under 2 seconds.",
+          "go": [
+            "httptest",
+            "t.TempDir",
+            "t.Cleanup",
+            "interface fakes"
+          ],
+          "pkgs": [
+            "net/http/httptest",
+            "testing"
+          ],
+          "hints": [
+            "`NewServer` gives you a real URL, and `srv.Client()` is preconfigured for it.",
+            "Fake the Store interface for error paths instead of corrupting real files.",
+            "`t.Cleanup(srv.Close)` keeps tests tidy."
+          ],
+          "unlock": "Test jig"
+        },
+        {
+          "id": "5.5",
+          "title": "Gauges",
+          "brief": "See inside the running server.",
+          "build": [
+            "`/healthz` and `/readyz`",
+            "expvar counters: requests, errors, keys, open connections",
+            "`net/http/pprof` on a separate admin port",
+            "A log level you can change at runtime"
+          ],
+          "win": "`curl :7071/debug/vars` shows your counters climbing under load, and `go tool pprof http://localhost:7071/debug/pprof/profile?seconds=10` opens a profile.",
+          "go": [
+            "expvar",
+            "pprof endpoints",
+            "liveness vs readiness",
+            "admin listeners"
+          ],
+          "pkgs": [
+            "expvar",
+            "net/http/pprof",
+            "log/slog"
+          ],
+          "hints": [
+            "Importing `net/http/pprof` registers on `http.DefaultServeMux`. Serve that mux only on the admin port.",
+            "`slog.LevelVar` can change while the server runs.",
+            "Readiness should fail while the store is still loading (WAL replay, once you have one). Liveness shouldn't."
+          ],
+          "unlock": "Admin port"
+        }
+      ]
+    },
+    {
+      "key": "S1",
+      "name": "Watch",
+      "optional": true,
+      "needs": [
+        "5"
+      ],
+      "line": "Optional. Live change feeds: pub/sub with channels and server-sent events.",
+      "pos": {
+        "row": 5,
+        "col": 1,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "S1.1",
+          "title": "Fan-out",
+          "brief": "An in-process broker that tells subscribers when keys change, without letting slow readers stall writes.",
+          "build": [
+            "The store publishes an event on every Set and Delete",
+            "`Subscribe(prefix) (<-chan Event, func())` returns a channel and an unsubscribe function",
+            "Buffered subscriber channels; a subscriber that falls too far behind gets disconnected"
+          ],
+          "win": "With one subscriber that never reads, 1,000 writes take no longer than with none, and that subscriber is dropped. Fast subscribers see every event in order.",
+          "go": [
+            "buffered channels",
+            "select with default",
+            "unsubscribe functions",
+            "sync.Once"
+          ],
+          "pkgs": [
+            "sync",
+            "context",
+            "strings"
+          ],
+          "hints": [
+            "`select { case ch <- ev: default: /* this subscriber is too slow */ }`",
+            "Make unsubscribe safe to call twice with `sync.Once`.",
+            "Only the broker closes subscriber channels. Sending on a closed channel panics."
+          ],
+          "unlock": "Broker"
+        },
+        {
+          "id": "S1.2",
+          "title": "Event Stream",
+          "brief": "Push changes to HTTP clients as server-sent events.",
+          "build": [
+            "`GET /v1/watch?prefix=user:` streams events as `text/event-stream`",
+            "A heartbeat comment every 15 seconds",
+            "Unsubscribe when the client disconnects"
+          ],
+          "win": "`curl -N 'localhost:8080/v1/watch?prefix=user:'` prints an event within a second of `PUT /v1/kv/user:1`. Closing curl drops the subscriber count back down.",
+          "go": [
+            "server-sent events",
+            "flushing",
+            "request context cancellation"
+          ],
+          "pkgs": [
+            "net/http",
+            "fmt",
+            "time"
+          ],
+          "hints": [
+            "`rc := http.NewResponseController(w)` then `rc.Flush()` after each event.",
+            "SSE is plain text: `data: ...` followed by a blank line. A line starting with `:` is a comment, handy as a heartbeat.",
+            "`<-r.Context().Done()` fires when the client goes away."
+          ],
+          "unlock": "Watch API"
+        },
+        {
+          "id": "S1.3",
+          "title": "Resume",
+          "brief": "Clients that reconnect pick up exactly where they left off.",
+          "build": [
+            "Monotonic event IDs sent as `id:` lines",
+            "A ring buffer of recent events",
+            "Honour the `Last-Event-ID` header on reconnect"
+          ],
+          "win": "Kill curl, write 5 keys, reconnect with `-H 'Last-Event-ID: <last id>'`: the 5 missed events arrive first, then live ones, with no gaps or duplicates.",
+          "go": [
+            "ring buffers",
+            "replay then live",
+            "race-free handover"
+          ],
+          "pkgs": [
+            "sync",
+            "strconv",
+            "net/http"
+          ],
+          "hints": [
+            "Subscribe first, then replay from the buffer, then skip live events you've already replayed.",
+            "A fixed-size slice plus a head index is a ring buffer. No extra package needed.",
+            "If the requested ID is older than the buffer, send a special event saying so rather than silently skipping."
+          ],
+          "unlock": "Resumable stream"
+        }
+      ]
+    },
+    {
+      "key": "S2",
+      "name": "Traffic Control",
+      "optional": true,
+      "needs": [
+        "5"
+      ],
+      "line": "Optional. Rate limiting, caching and request coalescing for real web traffic.",
+      "pos": {
+        "row": 5,
+        "col": 2,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "S2.1",
+          "title": "Token Bucket",
+          "brief": "Rate-limit clients by IP with a token bucket middleware.",
+          "build": [
+            "A token bucket per client IP: refill rate and burst size",
+            "`429 Too Many Requests` with a `Retry-After` header",
+            "Stale buckets cleaned up in the background"
+          ],
+          "win": "Twenty quick curls show 200s then 429s with `Retry-After`. A test with an injected clock proves tokens refill at the right rate.",
+          "go": [
+            "time arithmetic",
+            "maps of state",
+            "middleware",
+            "cleanup goroutines"
+          ],
+          "pkgs": [
+            "net",
+            "net/http",
+            "sync",
+            "time",
+            "strconv"
+          ],
+          "hints": [
+            "Refill lazily: on each request add `elapsed × rate` tokens, capped at the burst size.",
+            "`net.SplitHostPort(r.RemoteAddr)` gives you the client IP.",
+            "Unused buckets leak memory. Sweep them with the janitor pattern from 1.4."
+          ],
+          "unlock": "Rate limiter"
+        },
+        {
+          "id": "S2.2",
+          "title": "LRU Cache",
+          "brief": "A read-through cache in front of a slow store.",
+          "build": [
+            "An LRU cache bounded by total bytes, built on `container/list` and a map",
+            "Invalidate on Set and Delete",
+            "Hit and miss counters in expvar"
+          ],
+          "win": "Tests prove eviction order. With a store that takes 50 ms per read, cache hits return in under a millisecond, and the counters show the hit rate.",
+          "go": [
+            "linked lists",
+            "cache invalidation",
+            "generics (optional)"
+          ],
+          "pkgs": [
+            "container/list",
+            "sync",
+            "expvar"
+          ],
+          "hints": [
+            "Map each key to its `*list.Element` and move it to the front on every hit.",
+            "Forget invalidation and the cache serves stale data. Test that case first.",
+            "Try writing it as `LRU[K comparable, V any]`. It's a good first generics exercise."
+          ],
+          "unlock": "LRU cache"
+        },
+        {
+          "id": "S2.3",
+          "title": "Single Flight",
+          "brief": "Collapse a stampede of identical cache misses into one store read.",
+          "build": [
+            "Concurrent misses for the same key share one in-flight call",
+            "Every waiter gets the same value or the same error",
+            "The in-flight entry is removed when the call finishes"
+          ],
+          "win": "100 concurrent GETs for one cold key cause exactly 1 store read, and all 100 get the value. A failed read is shared too, but isn't cached.",
+          "go": [
+            "coordinating waiters",
+            "WaitGroup as a latch",
+            "shared results"
+          ],
+          "pkgs": [
+            "sync"
+          ],
+          "hints": [
+            "Keep a `map[string]*call` where `call` holds a `WaitGroup`, the value and the error.",
+            "The first caller does the work. Everyone else calls `Wait()` and reads the result.",
+            "Delete the map entry when the call finishes, so the next miss tries again."
+          ],
+          "unlock": "Single flight"
+        }
+      ]
+    },
+    {
+      "key": "S3",
+      "name": "Queues",
+      "optional": true,
+      "needs": [
+        "3"
+      ],
+      "line": "Optional. Azure Service Bus fundamentals, built yourself: peek-lock, dead letters, scheduling and duplicate detection.",
+      "pos": {
+        "row": 4,
+        "col": 4,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "S3.1",
+          "title": "Mailbox",
+          "brief": "A durable queue broker speaking your frame protocol, carrying the same message shape Service Bus uses.",
+          "build": [
+            "A `Message` with `MessageID`, `Body`, `ContentType`, `CorrelationID`, `Subject` and `ApplicationProperties`, plus broker-set `SequenceNumber` and `EnqueuedTime`",
+            "Named queues; `Send` and `Receive` in receive-and-delete mode",
+            "Every send goes through your Chapter 3 WAL before it's acknowledged",
+            "`burrowctl bus send orders <body>` and `burrowctl bus receive orders`"
+          ],
+          "win": "Send 1,000 messages, `kill -9` the broker, restart: you receive all 1,000 exactly once, in order, with sequence numbers that only go up.",
+          "go": [
+            "struct design",
+            "monotonic counters",
+            "reusing your WAL"
+          ],
+          "pkgs": [
+            "encoding/json",
+            "sync",
+            "time"
+          ],
+          "hints": [
+            "Service Bus has two receive modes. Receive-and-delete is at-most-once: if your consumer crashes after receiving, the message is gone. The next level fixes that.",
+            "The broker assigns sequence numbers, never the client. Rebuild the counter from the WAL on replay.",
+            "Keep bodies as `[]byte`. Real Service Bus bodies are opaque bytes too; the content type tells consumers how to read them."
+          ],
+          "unlock": "Queue broker"
+        },
+        {
+          "id": "S3.2",
+          "title": "Peek-Lock",
+          "brief": "Receive without losing messages: lock a message while you work on it, then settle it.",
+          "build": [
+            "Peek-lock `Receive` returns the message plus a random `LockToken` and `LockedUntil`",
+            "`Complete`, `Abandon` and `RenewLock` by lock token",
+            "Locks expire after the queue's `LockDuration` (Service Bus defaults to 1 minute, max 5) and the message becomes available again",
+            "`DeliveryCount` goes up when a message is abandoned or its lock expires"
+          ],
+          "win": "Receive and walk away: once the lock expires the message comes back with `DeliveryCount` 2. Completing with an expired token fails with `ErrLockLost`. All proven with an injected clock.",
+          "go": [
+            "at-least-once delivery",
+            "expiry scheduling",
+            "random tokens",
+            "state machines"
+          ],
+          "pkgs": [
+            "crypto/rand",
+            "container/heap",
+            "time",
+            "sync"
+          ],
+          "hints": [
+            "A message is available, locked or gone. Draw the transitions before you code them.",
+            "One goroutine watching a min-heap ordered by `LockedUntil` scales better than a `time.AfterFunc` per message. Try both and compare.",
+            "At-least-once means consumers will see duplicates. Peek-lock trades lost messages for repeated ones."
+          ],
+          "unlock": "Peek-lock"
+        },
+        {
+          "id": "S3.3",
+          "title": "Dead Letters",
+          "brief": "Poison and expired messages go somewhere you can inspect, instead of looping forever.",
+          "build": [
+            "Each queue gets a sub-queue at `orders/$deadletterqueue`",
+            "Past `MaxDeliveryCount` (default 10) a message moves there with reason `MaxDeliveryCountExceeded`",
+            "Consumers can call `DeadLetter(token, reason, description)` themselves",
+            "Per-message `TimeToLive`: expired messages are dropped, or dead-lettered with `TTLExpiredException` when the queue opts in",
+            "`burrowctl bus resubmit orders` moves dead letters back"
+          ],
+          "win": "A consumer that always abandons puts its message in the DLQ after 10 deliveries, with the right reason. An expired message lands there only on queues with dead-lettering on expiry turned on.",
+          "go": [
+            "sub-queues",
+            "settlement outcomes",
+            "error metadata"
+          ],
+          "pkgs": [
+            "time",
+            "errors",
+            "strings"
+          ],
+          "hints": [
+            "A dead-letter queue is just another queue with a special name. Reuse everything.",
+            "Check expiry when handing a message out, not only in the sweeper. Never deliver an expired message.",
+            "The DLQ is where on-call starts. Keep `DeadLetterReason`, `DeadLetterErrorDescription` and the delivery count on the message."
+          ],
+          "unlock": "Dead-letter queue"
+        },
+        {
+          "id": "S3.4",
+          "title": "Scheduled and Deferred",
+          "brief": "Messages that arrive in the future, and messages a consumer sets aside to handle later.",
+          "build": [
+            "`ScheduleMessage(msg, enqueueAt)` returns a sequence number; `CancelScheduled(seq)` removes it",
+            "A min-heap releases scheduled messages on time",
+            "`Defer(token)` hides a locked message from normal receives",
+            "`ReceiveDeferred(seqs...)` is the only way to get deferred messages back"
+          ],
+          "win": "A message scheduled 5 minutes out is invisible until the injected clock passes it, then arrives normally. A deferred message never comes back from `Receive`, only from `ReceiveDeferred` with its sequence number.",
+          "go": [
+            "heap.Interface",
+            "timer wake-ups",
+            "lookup by sequence number"
+          ],
+          "pkgs": [
+            "container/heap",
+            "time",
+            "sync"
+          ],
+          "hints": [
+            "`container/heap` needs Len, Less, Swap, Push and Pop on your type. Less compares enqueue times.",
+            "Sleep until the earliest scheduled time, but wake early when something sooner is scheduled. `select` on a timer and a wake channel does it.",
+            "Deferral is for out-of-order workflows: step 3 arrived before step 2, so park step 3 and remember its sequence number."
+          ],
+          "unlock": "Scheduler"
+        },
+        {
+          "id": "S3.5",
+          "title": "Duplicate Detection",
+          "brief": "Senders retry after timeouts. The broker drops the copies.",
+          "build": [
+            "Queues opt in with `RequiresDuplicateDetection` and a time window",
+            "A repeated `MessageID` inside the window is acknowledged but silently discarded",
+            "IDs fall out of the window as time passes",
+            "The set of recent IDs survives restarts"
+          ],
+          "win": "A test sends, fakes a timeout and resends with the same `MessageID`: the consumer sees one message. Once the window passes, the same ID is accepted again.",
+          "go": [
+            "idempotency",
+            "time-ordered expiry",
+            "map plus list"
+          ],
+          "pkgs": [
+            "container/list",
+            "time",
+            "sync"
+          ],
+          "hints": [
+            "A map for lookup plus a list ordered by arrival for expiry. Same shape as an LRU cache.",
+            "The sender must reuse the same `MessageID` on retry. Generating a fresh ID per attempt defeats the feature.",
+            "This only dedupes sends. Consumers still need to be idempotent, because peek-lock redelivers."
+          ],
+          "unlock": "Dedup window"
+        },
+        {
+          "id": "S3.6",
+          "title": "Competing Consumers",
+          "brief": "Many workers drain one queue quickly without processing anything twice.",
+          "build": [
+            "Long-polling `Receive(ctx, max)` that waits for messages instead of busy-looping",
+            "Client-side prefetch of up to N locked messages",
+            "Several consumers competing on one queue",
+            "Locks on prefetched messages keep ticking while they sit in the buffer"
+          ],
+          "win": "Three consumers drain 10,000 messages: every message is completed once and each consumer handles at least 25%. With a large prefetch and slow consumers, a test shows buffered locks expiring and those messages being redelivered.",
+          "go": [
+            "waiting without polling",
+            "fairness",
+            "flow control"
+          ],
+          "pkgs": [
+            "sync",
+            "context",
+            "time"
+          ],
+          "hints": [
+            "A blocked receiver should wake when a message arrives. `sync.Cond` or a notify channel per queue both work.",
+            "Prefetch trades latency for lock time. The lock starts when the broker hands the message over, not when your code reads it.",
+            "Service Bus clients do this over AMQP with link credit: the receiver tells the broker how many messages it can take."
+          ],
+          "unlock": "Competing consumers"
+        }
+      ]
+    },
+    {
+      "key": "S4",
+      "name": "Topics & Sessions",
+      "optional": true,
+      "needs": [
+        "S3"
+      ],
+      "line": "Optional. Pub/sub with filtered subscriptions, ordered sessions, transactions, then the real Azure Service Bus.",
+      "pos": {
+        "row": 5,
+        "col": 4,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "S4.1",
+          "title": "Fan-out Topics",
+          "brief": "One send, many independent copies: topics with subscriptions.",
+          "build": [
+            "`CreateTopic(name)` and `CreateSubscription(topic, name)`",
+            "A send to a topic copies the message into every subscription",
+            "Each subscription is a full queue: peek-lock, delivery count, DLQ",
+            "Paths like `events/Subscriptions/billing` and `events/Subscriptions/billing/$deadletterqueue`"
+          ],
+          "win": "Three subscriptions each get their own copy. Completing in `billing` doesn't touch `audit`. A subscription nobody reads keeps filling, and its DLQ works independently.",
+          "go": [
+            "composition",
+            "reusing types",
+            "copy semantics"
+          ],
+          "pkgs": [
+            "sync",
+            "strings"
+          ],
+          "hints": [
+            "Subscriptions are your Queues-chapter queue with a different name. If you're writing new settlement code, something is off.",
+            "Copy the message per subscription so a property set in one can't leak into another.",
+            "Write the whole fan-out as one WAL record, so a crash can't deliver to some subscriptions and not others."
+          ],
+          "unlock": "Topics"
+        },
+        {
+          "id": "S4.2",
+          "title": "Filters",
+          "brief": "Subscriptions choose which messages they want, using rules you parse and evaluate yourself.",
+          "build": [
+            "Correlation filters matching `CorrelationID`, `Subject` and application properties",
+            "A lexer and recursive-descent parser for a SQL filter subset, like `region = 'au' AND (amount > 100 OR priority IN ('high', 'urgent'))`",
+            "Evaluate the parsed tree against each message",
+            "A default rule that matches everything; a subscription whose rules don't match gets nothing"
+          ],
+          "win": "Table tests cover precedence (`AND` before `OR`), parentheses, strings, numbers, `IN`, `IS NULL` and `NOT`. Messages route only to subscriptions whose rules match. A malformed rule is rejected when it's created, not when a message arrives.",
+          "go": [
+            "lexers",
+            "recursive descent",
+            "AST interfaces",
+            "type switches"
+          ],
+          "pkgs": [
+            "strings",
+            "strconv",
+            "unicode",
+            "fmt"
+          ],
+          "hints": [
+            "Lexer first: turn the string into tokens (identifier, string, number, operator, keyword) and test it on its own.",
+            "One parse function per precedence level: `parseOr` calls `parseAnd`, which calls `parseNot`, which calls `parseComparison`.",
+            "Give each node an `Eval(msg) (any, error)` method. Comparing an `int` with a `float64` decoded from JSON is where the bugs hide."
+          ],
+          "unlock": "Rule engine"
+        },
+        {
+          "id": "S4.3",
+          "title": "Sessions",
+          "brief": "Strict ordering per customer, while different customers are processed in parallel.",
+          "build": [
+            "Messages carry a `SessionID`; session-enabled entities reject messages without one",
+            "`AcceptNextSession` locks a whole session to one receiver",
+            "Messages within a session come out strictly in order",
+            "`GetSessionState` and `SetSessionState` store a small blob per session"
+          ],
+          "win": "Three interleaved sessions and two receivers: each session is handled by one receiver at a time, in order, and session state survives a broker restart.",
+          "go": [
+            "keyed locks",
+            "per-key FIFO",
+            "per-key state"
+          ],
+          "pkgs": [
+            "sync",
+            "container/list",
+            "time"
+          ],
+          "hints": [
+            "A session lock is a peek-lock on a whole session instead of one message. Reuse your expiry machinery.",
+            "Session state is how a consumer remembers where it is in a workflow, like a tiny per-key database.",
+            "This is Service Bus's answer to ordering and parallelism at once. It's close to one OTP process per key."
+          ],
+          "unlock": "Sessions"
+        },
+        {
+          "id": "S4.4",
+          "title": "Forwarding and Transactions",
+          "brief": "Chain entities together, and settle one message while sending others, all or nothing.",
+          "build": [
+            "Auto-forward: a queue or subscription with `ForwardTo` pushes everything into another entity",
+            "A hop counter that dead-letters with `MaxTransferHopCountExceeded` when forwarding loops",
+            "A transaction that completes an input message and sends output messages atomically",
+            "Each transaction commits as a single WAL record"
+          ],
+          "win": "A forwarding loop between two queues dead-letters instead of spinning forever. Killing the broker mid-transaction never leaves the input completed without its outputs, or outputs sent while the input is still pending.",
+          "go": [
+            "atomic multi-step operations",
+            "loop detection",
+            "crash testing"
+          ],
+          "pkgs": [
+            "os",
+            "sync"
+          ],
+          "hints": [
+            "A transaction here is a list of operations applied together. Write them as one WAL record and the crash test passes for free.",
+            "Keep the hop count in a broker-owned property. Never trust a counter the client can set.",
+            "It's the transactional outbox pattern, moved into the broker."
+          ],
+          "unlock": "Transactions"
+        },
+        {
+          "id": "S4.5",
+          "title": "The Real Thing",
+          "brief": "Point the same scenarios at Azure Service Bus and see how close you got.",
+          "build": [
+            "Run the Azure Service Bus emulator in Docker, with queues, topics and subscriptions declared in its `config.json`",
+            "A separate module, `azcompare/`, using the official `azservicebus` Go SDK. This is the only place in the curriculum you add a dependency",
+            "Port your peek-lock, dead-letter, filter and session tests so they run against both Burrow and the emulator",
+            "Write a short table of what matched and what didn't"
+          ],
+          "win": "The same scenario suite passes against Burrow and the emulator, or fails in ways your table explains.",
+          "go": [
+            "third-party SDKs",
+            "separate modules",
+            "AMQP concepts"
+          ],
+          "pkgs": [
+            "azservicebus (Azure SDK)"
+          ],
+          "hints": [
+            "The emulator doesn't keep data across container restarts, so your `kill -9` tests only make sense against Burrow.",
+            "Map names as you go: `CompleteMessage`, `AbandonMessage`, `DeadLetterMessage`, `DeferMessage`, `RenewMessageLock`, `AcceptNextSessionForQueue`.",
+            "Real Service Bus speaks AMQP 1.0 over TCP. Your frame protocol plays the same role. Read the AMQP spec's settlement section with fresh eyes."
+          ],
+          "unlock": "Service Bus fluency"
+        }
+      ]
+    },
+    {
+      "key": "6",
+      "name": "Cluster",
+      "optional": false,
+      "needs": [
+        "5"
+      ],
+      "line": "Many nodes: RPC, membership, sharding and quorums.",
+      "pos": {
+        "row": 5,
+        "col": 3,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "6.1",
+          "title": "Multi-core",
+          "brief": "Run three Burrow nodes on one machine from a single command.",
+          "build": [
+            "Node flags: `-id`, `-http`, `-peer-addr`, `-data`",
+            "`cmd/devcluster` starts three burrowd processes with `os/exec`",
+            "Prefix each node's log lines (`n1 |`, `n2 |`)",
+            "Ctrl-C stops them all"
+          ],
+          "win": "`go run ./cmd/devcluster` starts n1 to n3 with prefixed logs. After Ctrl-C, `pgrep burrowd` finds nothing.",
+          "go": [
+            "os/exec",
+            "child processes",
+            "piping output",
+            "config structs"
+          ],
+          "pkgs": [
+            "os/exec",
+            "flag",
+            "bufio",
+            "io"
+          ],
+          "hints": [
+            "`cmd.StdoutPipe()` plus a `bufio.Scanner` gives you lines to prefix.",
+            "`exec.CommandContext` kills children when the context ends.",
+            "Give each node its own `-data` directory now, so their WALs won't collide once you add persistence."
+          ],
+          "unlock": "devcluster"
+        },
+        {
+          "id": "6.2",
+          "title": "Interconnect",
+          "brief": "Nodes talk to each other over your own frame codec.",
+          "build": [
+            "RPC on top of the 2.3 frames: request IDs and a method byte",
+            "Many calls multiplexed over one connection",
+            "A reader goroutine routes replies by ID",
+            "Timeouts from `ctx`"
+          ],
+          "win": "1,000 concurrent calls from n1 to n2 over one TCP connection all return correctly. Killing n2 mid-flight fails every pending call promptly instead of hanging.",
+          "go": [
+            "multiplexing",
+            "request correlation",
+            "reader goroutines",
+            "failing pending calls"
+          ],
+          "pkgs": [
+            "net",
+            "sync",
+            "context",
+            "encoding/binary"
+          ],
+          "hints": [
+            "Keep pending calls in a `map[uint64]chan reply` guarded by a mutex. Writers lock only around the write.",
+            "When the reader goroutine exits, walk the pending map and fail every call.",
+            "This is roughly how `net/rpc` works. Read its `client.go` after you finish."
+          ],
+          "unlock": "Interconnect RPC"
+        },
+        {
+          "id": "6.3",
+          "title": "Heartbeat",
+          "brief": "Every node knows which nodes are alive.",
+          "build": [
+            "A membership list with per-peer state: alive, suspect, dead",
+            "Periodic pings over your RPC",
+            "Suspect after missed pings, dead after a timeout",
+            "`GET /v1/cluster` shows the view"
+          ],
+          "win": "Kill n3: within 5 seconds n1 and n2 mark it suspect, then dead. Restart it and it returns to alive. Every node shows the same view.",
+          "go": [
+            "failure detection",
+            "timers",
+            "state machines",
+            "jitter"
+          ],
+          "pkgs": [
+            "time",
+            "math/rand/v2",
+            "sync"
+          ],
+          "hints": [
+            "Add jitter so nodes don't all ping on the same tick.",
+            "Give the state type a `String()` method and your logs read themselves.",
+            "You can't tell a dead node from a slow one. Write down what your timeouts trade off."
+          ],
+          "unlock": "Membership"
+        },
+        {
+          "id": "6.4",
+          "title": "Address Decoder",
+          "brief": "Spread keys across nodes so each one owns a slice of the keyspace.",
+          "build": [
+            "A hash ring with virtual nodes using `hash/fnv`",
+            "Lookups with a sorted slice and `slices.BinarySearch`",
+            "Any node forwards a request to the key's owner"
+          ],
+          "win": "10,000 keys land within ±15% of even across 3 nodes. Removing a node moves only about a third of the keys. A GET to any node returns the right value.",
+          "go": [
+            "consistent hashing",
+            "slices package",
+            "proxying",
+            "forwarding loops"
+          ],
+          "pkgs": [
+            "hash/fnv",
+            "slices",
+            "net/http/httputil"
+          ],
+          "hints": [
+            "Hash each node 100 or more times (`n1#0`, `n1#1`, ...) for an even spread.",
+            "Find the first ring point at or after `hash(key)`, wrapping to the start.",
+            "Add a header like `X-Burrow-Forwarded` to stop requests bouncing between nodes."
+          ],
+          "unlock": "Hash ring"
+        },
+        {
+          "id": "6.5",
+          "title": "Redundancy",
+          "brief": "Store each key on three nodes and survive losing one.",
+          "build": [
+            "N=3 replicas chosen from the ring",
+            "Writes fan out in parallel and succeed at W=2 acks",
+            "Reads ask R=2 and return the newest version",
+            "Cancel the slow replica once quorum is met; repair stale copies on read"
+          ],
+          "win": "With one node down, reads and writes still succeed. After it restarts, read repair brings its copy up to date. Goroutine counts match before and after a test.",
+          "go": [
+            "fan-out and fan-in",
+            "first k of n",
+            "context cancellation",
+            "versioning",
+            "read repair"
+          ],
+          "pkgs": [
+            "context",
+            "sync",
+            "time",
+            "runtime"
+          ],
+          "hints": [
+            "Buffer the results channel to N so late replies never block.",
+            "Return as soon as you have W successes, or as soon as W becomes impossible.",
+            "Last-write-wins with timestamps is simple and wrong under clock skew. Note why; Chapter 7 fixes it."
+          ],
+          "unlock": "Quorum"
+        }
+      ]
+    },
+    {
+      "key": "7",
+      "name": "Consensus",
+      "optional": false,
+      "needs": [
+        "6",
+        "3"
+      ],
+      "line": "Raft, from leader election to a replicated KV store.",
+      "pos": {
+        "row": 6,
+        "col": 3,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "7.1",
+          "title": "Election",
+          "brief": "Nodes agree on one leader per term.",
+          "build": [
+            "Follower, candidate and leader roles",
+            "Randomised election timeouts and the RequestVote RPC",
+            "One goroutine owns all Raft state and handles events in a `select` loop"
+          ],
+          "win": "Three nodes elect exactly one leader within 2 seconds. Kill it and a new leader with a higher term appears within 3 seconds. A test harness asserts there are never two leaders in one term.",
+          "go": [
+            "state owned by one goroutine",
+            "select over many channels",
+            "timer resets",
+            "reading a spec"
+          ],
+          "pkgs": [
+            "time",
+            "math/rand/v2",
+            "context"
+          ],
+          "hints": [
+            "Read Figure 2 of the Raft paper and keep it open. It is the spec.",
+            "One goroutine owning the state replaces most locks. It will feel familiar from OTP processes.",
+            "Run the harness with `-count=100`. Election bugs only appear sometimes."
+          ],
+          "unlock": "Leader election"
+        },
+        {
+          "id": "7.2",
+          "title": "Log Shipping",
+          "brief": "The leader replicates a log; entries commit once a majority has them.",
+          "build": [
+            "AppendEntries with the `prevLogIndex` and `prevLogTerm` check",
+            "`nextIndex` and `matchIndex` per follower",
+            "Advance `commitIndex`; heartbeats are empty AppendEntries"
+          ],
+          "win": "Partition a follower, write 100 entries, heal it: it catches up and all three logs are identical.",
+          "go": [
+            "log matching",
+            "follower catch-up",
+            "majority math"
+          ],
+          "pkgs": [
+            "sync",
+            "context"
+          ],
+          "hints": [
+            "On rejection, decrement `nextIndex` and retry. Optimise later.",
+            "Only count replicas to commit entries from the current term (Figure 8 in the paper).",
+            "Log every RPC with its term and indexes while debugging. You will need it."
+          ],
+          "unlock": "Replicated log"
+        },
+        {
+          "id": "7.3",
+          "title": "State Machine",
+          "brief": "Put the KV store on top of Raft for linearizable writes.",
+          "build": [
+            "Apply committed entries to your Store in order",
+            "Client writes go to the leader and wait for commit and apply",
+            "Followers redirect with 307 to the leader",
+            "Reads go through the leader with a read-index check"
+          ],
+          "win": "Writes through any node reach the leader and survive a leader failover. Followers never serve stale reads in the default mode.",
+          "go": [
+            "apply loops",
+            "waiting on results by index",
+            "redirects",
+            "linearizability"
+          ],
+          "pkgs": [
+            "net/http",
+            "context"
+          ],
+          "hints": [
+            "Keep a `map[index]chan result` so the HTTP handler can wait for its own entry.",
+            "If the term changes before your entry commits, return a leadership error.",
+            "Read-index: note `commitIndex`, confirm leadership with one heartbeat round, wait until applied reaches it."
+          ],
+          "unlock": "Raft KV"
+        },
+        {
+          "id": "7.4",
+          "title": "Non-volatile",
+          "brief": "Make Raft survive full restarts by reusing your WAL.",
+          "build": [
+            "Persist `currentTerm`, `votedFor` and log entries with the Chapter 3 WAL before replying to RPCs",
+            "Snapshots via your 3.3 compaction",
+            "InstallSnapshot for followers that fall far behind"
+          ],
+          "win": "Restart all three nodes at once: no acknowledged write is lost and terms never go backwards.",
+          "go": [
+            "what must be durable, and when",
+            "reuse across layers"
+          ],
+          "pkgs": [
+            "os"
+          ],
+          "hints": [
+            "Persist before you respond. Voting twice in one term after a crash breaks safety.",
+            "Your CRC guard from 3.2 now protects consensus state.",
+            "InstallSnapshot can wait until everything else works."
+          ],
+          "unlock": "Durable Raft"
+        }
+      ]
+    },
+    {
+      "key": "8",
+      "name": "Chaos",
+      "optional": false,
+      "needs": [
+        "7"
+      ],
+      "line": "Break it on purpose and prove it holds.",
+      "pos": {
+        "row": 7,
+        "col": 3,
+        "span": 2
+      },
+      "levels": [
+        {
+          "id": "8.1",
+          "title": "Fault Injector",
+          "brief": "A network proxy that makes the cluster's life miserable.",
+          "build": [
+            "A TCP proxy between nodes that can delay, drop and partition connections",
+            "A small HTTP admin API to control it",
+            "devcluster routes node-to-node traffic through it"
+          ],
+          "win": "`curl -X POST ':9000/partition?nodes=n1'` isolates n1, the other two elect a leader, and healing reunites the cluster.",
+          "go": [
+            "bidirectional copying",
+            "half-close",
+            "seeded randomness"
+          ],
+          "pkgs": [
+            "net",
+            "io",
+            "math/rand/v2",
+            "net/http"
+          ],
+          "hints": [
+            "Use two goroutines per proxied connection, one per direction.",
+            "Seed the random source so a failing run can be replayed exactly.",
+            "Delaying each chunk with `time.Sleep` is fine here. This is test tooling."
+          ],
+          "unlock": "Chaos proxy"
+        },
+        {
+          "id": "8.2",
+          "title": "History Checker",
+          "brief": "Record what clients saw and prove the cluster didn't lie.",
+          "build": [
+            "A load generator that logs each operation with start time, end time and result",
+            "A checker: every acknowledged write is readable later, and reads of a key never go back in time"
+          ],
+          "win": "A clean run passes. Deliberately serving reads from followers makes the checker fail and name the bad operation.",
+          "go": [
+            "concurrent clients",
+            "operation histories",
+            "consistency checking"
+          ],
+          "pkgs": [
+            "encoding/json",
+            "time",
+            "sync",
+            "slices"
+          ],
+          "hints": [
+            "Write histories as JSON lines so you can inspect failures with jq.",
+            "Start with \"no lost acknowledged writes\". It catches most bugs.",
+            "Full linearizability checking is hard. Porcupine and Jepsen's Knossos are the references if you want to go further."
+          ],
+          "unlock": "Checker"
+        },
+        {
+          "id": "8.3",
+          "title": "Leader Down",
+          "brief": "Final boss. Kill the leader during a write storm. Burrow must keep its promises.",
+          "build": [
+            "A scenario runner: start devcluster behind the chaos proxy",
+            "Run the load generator, `kill -9` the leader, partition a follower",
+            "Heal, restart, then run the checker"
+          ],
+          "win": "10 consecutive seeded runs pass the checker with zero lost acknowledged writes, using only the Go standard library.",
+          "go": [
+            "everything so far"
+          ],
+          "pkgs": [
+            "everything so far"
+          ],
+          "hints": [
+            "When it fails, replay the seed and read the RPC logs you added in 7.2.",
+            "Expect to find bugs in chapters you thought were finished. That's the game working.",
+            "When it passes, write the README. You've built a distributed database."
+          ],
+          "unlock": "Burrow v1"
+        }
+      ]
+    }
+  ]
+}

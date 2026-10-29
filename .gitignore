@@ -1,0 +1,13 @@
+# burrow's build output and scratch files
+.burrow/bin/
+.burrow/last-run.txt
+.burrow/progress.json.tmp
+
+# Fuzz corpora Go saves when a fuzz test finds a failure: keep them if you want
+# them as regression tests, by removing this line.
+testdata/fuzz/
+
+*.test
+*.out
+*.prof
+/bin/
