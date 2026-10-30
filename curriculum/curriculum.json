@@ -30,7 +30,6 @@
             "`go mod init burrow` with `go 1.24` in go.mod (done for you)",
             "`cmd/burrowd/main.go` with `run(args, stdout, stderr) int`",
             "`version`, `help` and usage errors with the right exit codes and streams",
-            "A README line stating the rules: standard library only, every test runs with -race, database/sql is out of scope because the standard library ships no driver",
             "`gofmt` and `go vet ./...` clean, from this level on"
           ],
           "win": "`burrowd version` prints `burrowd 0.1.0` and exits 0; usage mistakes exit 2 with usage on stderr; the built binary behaves the same; gofmt and go vet are clean.",
@@ -40,11 +39,10 @@
             "os.Args",
             "io.Writer",
             "exit codes",
+            "stdout vs stderr",
             "gofmt",
             "go vet",
-            "go run vs go build",
-            "internal/ packages",
-            "database/sql (the one to learn elsewhere)"
+            "go run vs go build"
           ],
           "pkgs": [
             "fmt",

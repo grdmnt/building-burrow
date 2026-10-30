@@ -10,11 +10,15 @@ var (
 	mdBold  = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 	goWords = regexp.MustCompile(`\b(func|type|struct|interface|package|var|const|return|map|chan|go|defer|select|case|if|else|for|range|switch)\b`)
 	goComm  = regexp.MustCompile(`(//.*)$`)
+	mdItal  = regexp.MustCompile(`(^|[\s(])\*([^*\s][^*]*)\*`)
+	mdNum   = regexp.MustCompile(`^(\d+)\. (.*)$`)
+	mdSub   = regexp.MustCompile(`^\s+[-*] (.*)$`)
 )
 
 func inline(s string) string {
 	s = mdCode.ReplaceAllStringFunc(s, func(m string) string { return yellow(m[1 : len(m)-1]) })
 	s = mdBold.ReplaceAllStringFunc(s, func(m string) string { return bold(m[2 : len(m)-2]) })
+	s = mdItal.ReplaceAllString(s, "${1}"+paint("3", "${2}"))
 	return s
 }
 
@@ -48,17 +52,20 @@ func renderMarkdown(src string) string {
 			continue
 		}
 		if inCode {
-			code := strings.ReplaceAll(l, "\t", "    ")
-			if lang == "go" {
-				comment := ""
-				if m := goComm.FindStringIndex(code); m != nil {
-					comment, code = code[m[0]:], code[:m[0]]
+			// Long lines wrap inside the box, continuing under a faint ↳.
+			commented := false
+			for j, chunk := range chunkRunes(strings.ReplaceAll(l, "\t", "    "), width-4) {
+				prefix := "  " + faint("│ ")
+				if j > 0 {
+					prefix = "  " + faint("│ ↳ ")
 				}
-				code = goWords.ReplaceAllStringFunc(code, magenta) + gray(comment)
-			} else if lang == "bash" {
-				code = cyan(code)
+				if commented {
+					out = append(out, prefix+gray(chunk))
+					continue
+				}
+				out = append(out, prefix+highlight(chunk, lang))
+				commented = lang == "go" && goComm.MatchString(chunk)
 			}
-			out = append(out, "  "+faint("│ ")+code)
 			continue
 		}
 		switch {
@@ -76,15 +83,24 @@ func renderMarkdown(src string) string {
 			for _, wl := range wrapVisible(inline(strings.TrimPrefix(l, "> ")), width-2) {
 				out = append(out, "  "+amber("▍ ")+wl)
 			}
+		case strings.HasPrefix(l, "- [ ] "), strings.HasPrefix(l, "- [x] "):
+			flush()
+			box := faint("☐")
+			if strings.HasPrefix(l, "- [x] ") {
+				box = green("☑")
+			}
+			out = append(out, hanging("  "+box+" ", "    ", inline(l[6:]), width-2)...)
 		case strings.HasPrefix(l, "- "):
 			flush()
-			for j, wl := range wrapVisible(inline(strings.TrimPrefix(l, "- ")), width-2) {
-				if j == 0 {
-					out = append(out, "  "+cyan("•")+" "+wl)
-				} else {
-					out = append(out, "    "+wl)
-				}
-			}
+			out = append(out, hanging("  "+cyan("•")+" ", "    ", inline(strings.TrimPrefix(l, "- ")), width-2)...)
+		case mdNum.MatchString(l):
+			flush()
+			m := mdNum.FindStringSubmatch(l)
+			num := m[1] + "."
+			out = append(out, hanging("  "+cyan(num)+" ", "  "+strings.Repeat(" ", len(num)+1), inline(m[2]), width-len(num)-1)...)
+		case mdSub.MatchString(l):
+			flush()
+			out = append(out, hanging("     "+faint("–")+" ", "       ", inline(mdSub.FindStringSubmatch(l)[1]), width-5)...)
 		case strings.HasPrefix(l, "|"):
 			flush()
 			var rows [][]string
@@ -178,6 +194,56 @@ func renderTable(rows [][]string, width int) []string {
 		}
 	}
 	return out
+}
+
+// hanging wraps text to width, putting first before the first line and rest
+// before the others.
+func hanging(first, rest, text string, width int) []string {
+	var out []string
+	for j, wl := range wrapVisible(text, width) {
+		if j == 0 {
+			out = append(out, first+wl)
+		} else {
+			out = append(out, rest+wl)
+		}
+	}
+	return out
+}
+
+// chunkRunes splits s into pieces of at most n runes.
+func chunkRunes(s string, n int) []string {
+	r := []rune(s)
+	if n < 10 || len(r) <= n {
+		return []string{s}
+	}
+	var out []string
+	for len(r) > n {
+		cut := n
+		// Prefer breaking after a space in the second half of the line.
+		for k := n; k > n/2; k-- {
+			if r[k-1] == ' ' {
+				cut = k
+				break
+			}
+		}
+		out = append(out, string(r[:cut]))
+		r = r[cut:]
+	}
+	return append(out, string(r))
+}
+
+func highlight(code, lang string) string {
+	switch lang {
+	case "go":
+		comment := ""
+		if m := goComm.FindStringIndex(code); m != nil {
+			comment, code = code[m[0]:], code[:m[0]]
+		}
+		return goWords.ReplaceAllStringFunc(code, magenta) + gray(comment)
+	case "bash":
+		return cyan(code)
+	}
+	return code
 }
 
 func appendGap(out []string) []string {
