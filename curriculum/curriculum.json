@@ -72,12 +72,13 @@
           ],
           "win": "8 valid and 17 invalid keys classified correctly, errors wrap ErrInvalidKey, quote the key, and stay short for huge keys; your own tests catch all five planted bugs and your example runs.",
           "go": [
+            "packages and _test.go files",
             "structs",
             "slices",
             "for range over strings (runes vs bytes)",
             "for range over int",
             "per-iteration loop variables (Go 1.22)",
-            "min, max and clear builtins",
+            "the min builtin",
             "sentinel errors",
             "%w wrapping",
             "errors.Is",
@@ -133,13 +134,16 @@
           ],
           "win": "Missing keys return ErrNotFound, empty values exist, no aliasing either way, cancelled contexts change nothing, Keys is sorted, and the storetest.Run conformance suite passes.",
           "go": [
-            "maps",
+            "structs and methods",
             "pointer receivers",
             "constructors",
+            "maps",
             "implicit interfaces",
             "compile-time assertions",
             "context.Context as first argument",
+            "multiple returns and zero values",
             "slice aliasing",
+            "bytes.Clone",
             "slices.Sort",
             "t.Helper"
           ],
@@ -174,9 +178,11 @@
           ],
           "win": "Race-free under the hammer: disjoint writers, a mixed Set/Get/Delete/Keys hammer over 32 hot keys, and Len/Keys during writes, with no torn values.",
           "go": [
-            "sync.RWMutex",
+            "goroutines (as callers)",
             "data races",
             "the race detector",
+            "sync.RWMutex",
+            "defer for unlock",
             "check-then-act",
             "channels as an alternative to locks"
           ],
@@ -209,8 +215,9 @@
           "go": [
             "optimistic concurrency",
             "sentinel errors for outcomes",
+            "retry loops",
             "strconv",
-            "retry loops"
+            "uint64"
           ],
           "pkgs": [
             "errors",
@@ -245,6 +252,8 @@
             "time.Time and time.Duration",
             "zero values as sentinels",
             "functional options",
+            "variadic parameters",
+            "method values",
             "injectable clocks"
           ],
           "pkgs": [
@@ -277,8 +286,9 @@
           "go": [
             "goroutines",
             "the go statement",
-            "time.Ticker",
+            "channels and close",
             "select",
+            "time.Ticker",
             "done channels",
             "sync.WaitGroup",
             "goroutine lifecycle",
@@ -331,14 +341,16 @@
           ],
           "win": "Golden bytes match, round trips survive one-byte readers, EOF rules are exact, a 4 GiB length doesn't allocate, Write is called once per record, and the fuzzer finds nothing; your own fuzz target survives two seconds of fuzzing.",
           "go": [
-            "encoding/binary",
+            "io.Reader",
             "io.ReadFull",
             "io.ErrUnexpectedEOF vs io.EOF",
-            "defensive limits",
+            "encoding/binary",
             "arrays vs slices",
-            "copy and bytes.Clone",
+            "defensive limits",
             "append and capacity",
+            "copy and bytes.Clone",
             "three-index slicing s[a:b:c]",
+            "io.ErrShortWrite",
             "testing/iotest",
             "writing a fuzz target"
           ],
@@ -374,6 +386,7 @@
             "typed constants and iota",
             "fmt.Stringer",
             "byte layouts",
+            "signed/unsigned conversions",
             "composition of codecs"
           ],
           "pkgs": [
@@ -508,6 +521,7 @@
             "the typed-nil interface trap",
             "mapping errors across a network",
             "mutex-guarded request/reply pairing",
+            "net.Dialer.DialContext",
             "flag.FlagSet",
             "subcommands"
           ],
@@ -584,10 +598,10 @@
           "win": "Idle connections close at once, in-flight requests finish, the context deadline force-closes, repeated and concurrent Shutdowns return nil, nothing leaks, and the binary exits 0 on SIGINT and SIGTERM.",
           "go": [
             "os/signal.NotifyContext",
+            "syscall.SIGTERM",
             "shutdown ordering",
             "bounded waits",
-            "sync.Once",
-            "syscall.SIGTERM"
+            "sync.Once"
           ],
           "pkgs": [
             "os/signal",
@@ -850,9 +864,10 @@
           ],
           "win": "Set 500 keys through burrowctl, SIGKILL the daemon, restart it: every key, version and TTL is back; a clean shutdown leaves a snapshot and a tiny log.",
           "go": [
-            "composition",
+            "composition through an interface",
             "flags with defaults",
-            "process lifecycle testing"
+            "SIGTERM vs SIGKILL",
+            "process lifecycle testing with os/exec"
           ],
           "pkgs": [
             "flag",
@@ -942,12 +957,13 @@
           ],
           "win": "net/http parses every response you write, bad lengths are 400, oversized bodies 413, truncated bodies read io.ErrUnexpectedEOF, and a panicking handler yields a 500 while the server keeps serving.",
           "go": [
-            "io.LimitReader and your own io.Reader",
-            "http.TimeFormat",
-            "defer: argument evaluation time and LIFO order",
-            "recover through named results",
+            "methods on function types (HandlerFunc)",
+            "method values as adapters",
             "bytes.Buffer",
-            "method values as adapters"
+            "io.LimitReader and your own io.Reader",
+            "time layouts and http.TimeFormat",
+            "defer: argument evaluation time and LIFO order",
+            "recover through named results"
           ],
           "pkgs": [
             "io",
@@ -980,10 +996,10 @@
           ],
           "win": "Routing, percent-decoding, specificity and 405/Allow behave like Go 1.22's ServeMux, and the KV API works through a real HTTP client including 2 MiB uploads and NUL bytes.",
           "go": [
-            "methods on function types",
-            "the adapter pattern",
-            "net/url.PathUnescape",
+            "pattern parsing at registration",
+            "panics for programmer errors",
             "slices.Compare for ranking",
+            "net/url.PathUnescape",
             "closures capturing a Store"
           ],
           "pkgs": [
@@ -1079,12 +1095,12 @@
           "win": "Every endpoint speaks JSON when asked, every error is an ErrorResponse with the right code, strict decoding rejects unknown fields, trailing data and bad base64 with messages naming the problem, and a batch of 1000 ops returns 1000 results in order.",
           "go": [
             "struct tags",
-            "json.Decoder vs json.Unmarshal",
-            "DisallowUnknownFields",
-            "json.Marshaler/Unmarshaler",
+            "[]byte as base64",
             "pointer fields for optional values",
             "omitempty vs omitzero (Go 1.24)",
-            "[]byte as base64",
+            "json.Marshaler/Unmarshaler",
+            "json.Decoder vs json.Unmarshal",
+            "DisallowUnknownFields",
             "content negotiation"
           ],
           "pkgs": [
@@ -1118,13 +1134,13 @@
           ],
           "win": "Every request logs one JSON line with id, method, path, status and duration; a panicking handler returns a JSON 500 with the request id and the server keeps serving.",
           "go": [
-            "closures",
-            "decorators",
+            "closures as decorators",
             "embedding an interface in a struct",
             "comma-ok type assertions",
             "Unwrap() and http.NewResponseController",
             "context values with unexported key types",
-            "structured logging"
+            "crypto/rand",
+            "structured logging with slog"
           ],
           "pkgs": [
             "log/slog",
@@ -1158,10 +1174,10 @@
           ],
           "win": "A store with an injected 5 s delay makes requests fail with 503 after the 1 s budget and sees its context cancelled; a slowloris client is dropped by ReadHeaderTimeout; Ctrl-C drains HTTP and TCP together.",
           "go": [
-            "context deadlines and propagation",
+            "context.WithTimeout and propagation through r.Context()",
+            "select on ctx.Done()",
             "http.Server timeouts",
-            "http.Server.Shutdown",
-            "select on ctx.Done()"
+            "http.Server.Shutdown"
           ],
           "pkgs": [
             "net/http",
@@ -1199,7 +1215,7 @@
             "reading and closing response bodies",
             "idempotency and retry safety",
             "exponential backoff with jitter",
-            "errors.As with custom types"
+            "an Unwrap method that maps to sentinels"
           ],
           "pkgs": [
             "net/http",
@@ -1655,7 +1671,8 @@
           "go": [
             "log matching",
             "majority math",
-            "invariant tests"
+            "invariant tests",
+            "slices.Sorted and maps.Values"
           ],
           "pkgs": [
             "sync",
@@ -1914,7 +1931,8 @@
           "go": [
             "operation histories",
             "consistency models",
-            "slices.SortFunc"
+            "slices.SortFunc",
+            "build tags"
           ],
           "pkgs": [
             "encoding/json",
@@ -1946,10 +1964,9 @@
           ],
           "win": "10 consecutive seeded runs pass the checker with zero violations, using only the Go standard library.",
           "go": [
-            "everything so far",
             "-ldflags -X",
             "GOOS and GOARCH cross-compilation",
-            "-trimpath",
+            "-trimpath and -s -w",
             "go version -m"
           ],
           "pkgs": [
@@ -2058,7 +2075,9 @@
           "go": [
             "SetReadDeadline per phase",
             "bufio.Reader.Peek",
-            "net.Error.Timeout"
+            "net.Error.Timeout",
+            "io.Discard for draining",
+            "strings.EqualFold"
           ],
           "pkgs": [
             "net",
@@ -2090,8 +2109,10 @@
           "win": "Flushed data reaches the client while the handler is still blocked, chunked uploads decode, every malformed case is rejected, and 2,500 keys stream back in order.",
           "go": [
             "chunk framing",
-            "hex lengths",
-            "io.Writer wrappers"
+            "hex lengths with strconv.ParseUint",
+            "io.Writer wrappers",
+            "a state-machine io.Reader",
+            "Flush through bufio.Writer"
           ],
           "pkgs": [
             "bufio",
@@ -2124,8 +2145,11 @@
           "win": "Your parser agrees with net/http on 9 differential requests, survives fuzzing, never emits CR/LF from a header value, handles 1,000 keep-alive requests from 50 clients, and shuts down gracefully.",
           "go": [
             "differential testing",
-            "fuzzing parsers",
-            "reading the standard library"
+            "running the fuzzer and testdata/fuzz corpora",
+            "reading the standard library with go doc and GOROOT",
+            "header injection and request smuggling",
+            "1xx interim responses",
+            "atomic.Bool"
           ],
           "pkgs": [
             "net/http (tests only)",
@@ -2174,8 +2198,10 @@
           "win": "Twenty quick requests show 200s then 429s with Retry-After, and a FakeClock test proves refill at the right rate.",
           "go": [
             "time arithmetic",
-            "maps of state",
-            "cleanup goroutines"
+            "maps of state behind a mutex",
+            "net.SplitHostPort",
+            "cleanup goroutines",
+            "http.StatusTooManyRequests and Retry-After"
           ],
           "pkgs": [
             "net",
@@ -2209,7 +2235,7 @@
           ],
           "win": "Tests prove eviction order; with a 50 ms store, 100 concurrent GETs for one cold key cause exactly 1 store read and all 100 get the value; the load test through the rate limiter shows 429s for the abuser and a 95% hit rate for the rest.",
           "go": [
-            "generics",
+            "generics: type parameters and constraints",
             "container/list",
             "WaitGroup as a latch",
             "cache invalidation"
@@ -2311,10 +2337,11 @@
             "crypto/subtle.ConstantTimeCompare",
             "crypto/sha256",
             "timing side channels",
-            "roles and a principal in context",
+            "roles with iota and a principal in context",
             "WWW-Authenticate and 401 vs 403",
             "r.TLS as a connection property",
-            "environment variables as defaults for flags"
+            "environment variables as defaults for flags",
+            "bufio.Scanner with line numbers"
           ],
           "pkgs": [
             "crypto/subtle",
@@ -2410,6 +2437,8 @@
           "win": "10,000 keys land within ±15% of even across 3 nodes; removing a node moves about a third; a GET to any node returns the right value.",
           "go": [
             "consistent hashing",
+            "virtual nodes",
+            "hash/fnv",
             "slices.BinarySearch",
             "proxying"
           ],
@@ -2445,7 +2474,9 @@
           "win": "With one node down, reads and writes still succeed; after it restarts, read repair brings its copy up to date; goroutine counts match before and after.",
           "go": [
             "fan-out/fan-in reuse",
-            "versioning"
+            "N/W/R quorums",
+            "last-write-wins versioning",
+            "read repair"
           ],
           "pkgs": [
             "context",
@@ -2528,6 +2559,7 @@
           "win": "Send 1,000 messages, kill -9 the broker, restart: you receive all 1,000 exactly once, in order, with sequence numbers that only go up.",
           "go": [
             "struct design",
+            "JSON struct tags and encoding rules",
             "monotonic counters",
             "reusing the WAL"
           ],
@@ -2566,7 +2598,9 @@
           "win": "Receive and walk away: once the lock expires the message comes back with DeliveryCount 2; completing with an expired token fails with ErrLockLost; a consumer that always abandons sends its message to the DLQ after 10 deliveries. All on a FakeClock.",
           "go": [
             "state machines",
-            "lease reuse"
+            "iota enums",
+            "lease reuse",
+            "crypto/rand tokens"
           ],
           "pkgs": [
             "crypto/rand",
@@ -2601,6 +2635,8 @@
           "win": "Three consumers drain 10,000 messages: every message is completed once and each consumer handles at least 25%; with a large prefetch and slow consumers, buffered locks expire and those messages are redelivered.",
           "go": [
             "sync.Cond",
+            "Broadcast vs Signal",
+            "waking a Cond on context cancel",
             "flow control"
           ],
           "pkgs": [
@@ -2635,9 +2671,11 @@
           "win": "The same scenario suite passes against Burrow and the emulator, or fails in ways your table explains.",
           "go": [
             "require vs tool directives",
-            "replace and go.work for a multi-module repo",
-            "third-party SDKs",
-            "build tags for integration tests"
+            "a second module in one repo",
+            "replace and go.work",
+            "third-party SDKs and pointer fields",
+            "build tags for integration tests",
+            "t.Skip"
           ],
           "pkgs": [
             "azservicebus (Azure SDK; the one dependency in the curriculum)"
