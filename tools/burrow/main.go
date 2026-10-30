@@ -16,7 +16,9 @@ import (
 
 const helpText = `burrow · learn Go by building a distributed key-value store
 
-  burrow                  dashboard: progress and what to do next
+  burrow                  the full-screen browser: levels, pages and the machine
+  burrow status           dashboard: progress and what to do next
+  burrow machine          Burrow as a machine: every part you've built, lit up
   burrow map              the chapter tech tree
   burrow list [chapter]   every level and its state
   burrow parts            the parts you've built and where each one plugs in
@@ -65,8 +67,17 @@ func run(args []string) error {
 	}
 	w := &world{cur: cur, prog: prog}
 	switch cmd {
-	case "", "status":
+	case "":
+		if isTTY && os.Getenv("TERM") != "dumb" {
+			return cmdBrowse(w)
+		}
 		return cmdStatus(w)
+	case "status":
+		return cmdStatus(w)
+	case "browse", "ui":
+		return cmdBrowse(w)
+	case "machine", "m":
+		return cmdMachine(w)
 	case "map", "tree":
 		return cmdMap(w)
 	case "list", "ls":
@@ -241,11 +252,40 @@ func cmdShow(w *world, args []string) error {
 		status = gray("locked: " + w.lockReason(l))
 	}
 	head := "\n  " + gray(chapterLabel(l.ch)+" · "+l.ch.Name) + gray("  ·  ") + status + gray("  ·  ") + pips(l.Difficulty) +
-		"\n  " + gray("builds ") + amber(bold(l.Unlock)) + ifs(len(l.Consumes) > 0, gray("   from ")+usesLine(w, l))
-	body := renderMarkdown(string(src))
+		"\n  " + gray("builds ") + amber(bold(l.Unlock))
+	body := levelBody(w, l, string(src), termWidth-4)
 	foot := "\n" + rule("") + "\n  " + gray("Hints: ") + fmt.Sprintf("%d/%d revealed", w.prog.Hints[l.ID], len(l.Hints)) + gray("  ·  burrow hint") + "\n"
 	page(head + "\n\n" + body + "\n" + foot)
 	return nil
+}
+
+// levelBody renders a level's README and draws the how-it-fits diagram under
+// its "What you're using from before" heading.
+func levelBody(w *world, l *Level, src string, width int) string {
+	body := renderMarkdownW(src, width)
+	diagram := fitDiagram(w, l, width)
+	if len(diagram) == 0 {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	at := -1
+	for i, ln := range lines {
+		if strings.Contains(ansiRE.ReplaceAllString(ln, ""), "WHAT YOU'RE USING FROM BEFORE") {
+			at = i + 1
+			break
+		}
+	}
+	block := []string{""}
+	for _, d := range diagram {
+		block = append(block, "  "+d)
+	}
+	if at < 0 {
+		return strings.Join(block, "\n") + "\n\n" + body
+	}
+	out := append([]string{}, lines[:at]...)
+	out = append(out, block...)
+	out = append(out, lines[at:]...)
+	return strings.Join(out, "\n")
 }
 
 // page shows long output through less when it won't fit the screen.
@@ -557,6 +597,8 @@ func complete(w *world, l *Level) error {
 		before[x.ID] = true
 	}
 	chWasDone := w.chapterDone(l.ch)
+	fmt.Println()
+	switchOn(w, l)
 	w.prog.Completed[l.ID] = time.Now()
 	if w.prog.Current == l.ID {
 		w.prog.Current = ""

@@ -12,7 +12,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 )
@@ -126,35 +125,11 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 	cmd.Stderr = &stderr
 
 	start := time.Now()
-	var mu sync.Mutex
-	phase := "Compiling"
-	running := map[string]time.Time{}
-	lv := startLive(func(frame int) string {
-		mu.Lock()
-		defer mu.Unlock()
-		sp := cyan(spinFrames[frame%len(spinFrames)])
-		el := duration(time.Since(start))
-		counts := ""
-		if sum.pass+sum.fail+sum.skip > 0 {
-			counts = "  " + green(fmt.Sprint(sum.pass)) + gray(" passed") +
-				ifs(sum.fail > 0, "  "+red(fmt.Sprint(sum.fail))+gray(" failed"))
-		}
-		now := ""
-		if len(running) > 0 {
-			var newest string
-			var t0 time.Time
-			for n, t := range running {
-				if t.After(t0) {
-					newest, t0 = n, t
-				}
-			}
-			now = gray("  · " + truncate(humanize(shortName(newest)), 32))
-		}
-		return "  " + sp + " " + bold(phase) + gray("  "+el) + counts + now
-	})
+	rv := newRunView(o.quiet)
+	testing := false
 
 	if err := cmd.Start(); err != nil {
-		lv.Stop()
+		rv.done(false)
 		fmt.Println(red("  could not run go test: ") + err.Error())
 		sum.buildFailed = true
 		return sum
@@ -168,7 +143,6 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
 			continue
 		}
-		mu.Lock()
 		switch {
 		case ev.Action == "build-output":
 			sum.buildOutput[ev.ImportPath] = append(sum.buildOutput[ev.ImportPath], ev.Output)
@@ -185,11 +159,15 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 					sum.buildFailed = true
 				}
 			}
-			if ev.Action == "start" {
-				phase = "Testing"
+			if ev.Action == "start" && !testing {
+				testing = true
+				rv.phase("Testing")
 			}
 		default:
-			phase = "Testing"
+			if !testing {
+				testing = true
+				rv.phase("Testing")
+			}
 			key := ev.Package + "\x00" + ev.Test
 			r := byKey[key]
 			if r == nil {
@@ -204,7 +182,7 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 			switch ev.Action {
 			case "run":
 				if !strings.Contains(ev.Test, "/") {
-					running[ev.Test] = time.Now()
+					rv.start(key, ev.Test)
 				}
 			case "output":
 				if keepOutput(ev.Output) {
@@ -213,7 +191,6 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 			case "pass", "fail", "skip":
 				r.status, r.elapsed = ev.Action, ev.Elapsed
 				if !strings.Contains(ev.Test, "/") {
-					delete(running, ev.Test)
 					switch ev.Action {
 					case "pass":
 						sum.pass++
@@ -223,19 +200,13 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 						sum.skip++
 					}
 					sum.results = append(sum.results, r)
-					if !o.quiet {
-						line := renderResultLine(r)
-						mu.Unlock()
-						lv.Println(line)
-						mu.Lock()
-					}
+					rv.finish(key, ev.Action, renderResultLine(r))
 				}
 			}
 		}
-		mu.Unlock()
 	}
 	err := cmd.Wait()
-	lv.Stop()
+	rv.done(err == nil && !sum.buildFailed && sum.fail == 0 && ctx.Err() == nil)
 	sum.elapsed = time.Since(start)
 	if ctx.Err() != nil {
 		sum.cancelled = true

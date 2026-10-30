@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -11,22 +12,33 @@ var (
 	goWords = regexp.MustCompile(`\b(func|type|struct|interface|package|var|const|return|map|chan|go|defer|select|case|if|else|for|range|switch)\b`)
 	goComm  = regexp.MustCompile(`(//.*)$`)
 	mdItal  = regexp.MustCompile(`(^|[\s(])\*([^*\s][^*]*)\*`)
+	mdSpan  = regexp.MustCompile("\x00[0-9]+\x00")
 	mdNum   = regexp.MustCompile(`^(\d+)\. (.*)$`)
 	mdSub   = regexp.MustCompile(`^\s+[-*] (.*)$`)
 )
 
 func inline(s string) string {
-	s = mdCode.ReplaceAllStringFunc(s, func(m string) string { return yellow(m[1 : len(m)-1]) })
+	// Code spans first, kept aside so * and ** inside them stay literal.
+	var spans []string
+	s = mdCode.ReplaceAllStringFunc(s, func(m string) string {
+		spans = append(spans, yellow(m[1:len(m)-1]))
+		return "\x00" + strconv.Itoa(len(spans)-1) + "\x00"
+	})
 	s = mdBold.ReplaceAllStringFunc(s, func(m string) string { return bold(m[2 : len(m)-2]) })
 	s = mdItal.ReplaceAllString(s, "${1}"+paint("3", "${2}"))
-	return s
+	return mdSpan.ReplaceAllStringFunc(s, func(m string) string {
+		i, _ := strconv.Atoi(m[1 : len(m)-1])
+		return spans[i]
+	})
 }
 
 // renderMarkdown renders the small markdown subset the level READMEs use.
-func renderMarkdown(src string) string {
+func renderMarkdown(src string) string { return renderMarkdownW(src, termWidth-4) }
+
+// renderMarkdownW renders markdown to fit width columns (plus a 2-space indent).
+func renderMarkdownW(src string, width int) string {
 	var out []string
 	lines := strings.Split(src, "\n")
-	width := termWidth - 4
 	inCode, lang := false, ""
 	var para []string
 	flush := func() {

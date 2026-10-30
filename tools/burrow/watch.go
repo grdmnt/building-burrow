@@ -201,7 +201,7 @@ func cmdWatch(w *world, args []string) error {
 			case 's', 'S':
 				clearScreen()
 				src, _ := os.ReadFile(w.cur.levelDir(l) + "/README.md")
-				fmt.Println(renderMarkdown(string(src)))
+				fmt.Println(levelBody(w, l, string(src), termWidth-4))
 				footer()
 			case 'd', 'D':
 				if w.levelDone(l) {

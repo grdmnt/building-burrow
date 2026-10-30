@@ -4,8 +4,13 @@ set -e
 root="$(cd "$(dirname "$0")" && pwd)"
 bin="$root/.burrow/bin/burrow"
 src="$root/tools/burrow"
-if [ ! -x "$bin" ] || [ -n "$(find "$src" -name '*.go' -newer "$bin" 2>/dev/null | head -n 1)" ]; then
+if [ ! -x "$bin" ] || [ -n "$(find "$src" \( -name '*.go' -o -name go.mod \) -newer "$bin" 2>/dev/null | head -n 1)" ]; then
   mkdir -p "$root/.burrow/bin"
-  (cd "$src" && go build -o "$bin" .)
+  # The CLI uses Bubble Tea and Lip Gloss. The first build downloads them (and
+  # records their checksums in go.sum); later builds work offline.
+  (cd "$src" && GOFLAGS=-mod=mod go build -o "$bin" .) || {
+    echo "burrow: couldn't build the CLI. The first build needs internet to download its libraries." >&2
+    exit 1
+  }
 fi
 BURROW_ROOT="$root" exec "$bin" "$@"

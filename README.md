@@ -6,12 +6,12 @@ It plays like Turing Complete and Exercism. Each level gives you one new idea, a
 
 ## Setup
 
-You need Go 1.24 or newer. The race detector needs cgo: on macOS that's the Xcode command line tools (`xcode-select --install`).
+You need Go 1.24 or newer, and internet the first time you run `./burrow` (it builds its terminal UI, which uses Bubble Tea and Lip Gloss). The race detector needs cgo: on macOS that's the Xcode command line tools (`xcode-select --install`).
 
 ```bash
 git clone <this repo> building-burrow
 cd building-burrow
-./burrow          # dashboard
+./burrow          # the full-screen browser: levels, their pages, the machine
 ./burrow next     # start level 0.1
 ```
 
@@ -20,8 +20,8 @@ Optional: `alias burrow="$PWD/burrow"` in your shell profile so you can type `bu
 ## The loop
 
 ```bash
-burrow show       # read the level's spec: exact API, rules, what the tests check
-burrow watch      # tests re-run every time you save   (h hint · r rerun · s spec · d done · q quit)
+burrow show       # read the level's page: the goal, how it fits, steps, examples
+burrow watch      # tests re-run every time you save, each test a lamp on the board   (h hint · r rerun · s spec · d done · q quit)
 burrow hint       # reveal the next of three hints
 burrow done       # verify everything passes and complete the level
 burrow next       # start the next level, or choose when the path branches
@@ -30,7 +30,10 @@ burrow next       # start the next level, or choose when the path branches
 Look around:
 
 ```bash
+burrow            # browse: ↑↓ levels, → read, tab for the machine and the map
+burrow machine    # Burrow as a machine, every part you've built lit up
 burrow map        # the chapter tech tree
+burrow status     # progress and what to do next
 burrow list       # every level and its state
 burrow test --all # re-run every level you've started, to catch regressions
 ```
@@ -50,7 +53,8 @@ curriculum/            the levels: specs, hints and test suites (don't edit)
   curriculum.json
   levels/<id>/README.md
   levels/<id>/files/   test files that `burrow start` copies into your code
-tools/burrow/          the CLI (standard library only, like everything else)
+tools/burrow/          the CLI, built on Bubble Tea and Lip Gloss (its own module: your code stays standard library only)
+  tui/                 the drawing kit: palette, canvas with wires and boxes, lamps
 .burrow/progress.json  your progress; commit it to sync between machines
 ```
 
