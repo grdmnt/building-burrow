@@ -33,6 +33,7 @@ func (s *Server) Handler() http.Handler
 - `api.Server.Handler()` on `http.ServeMux` with method patterns and `r.PathValue`
 - `http.MaxBytesReader` for 413; If-Match mapped to CompareAndSwap, If-Match + ?ttl= to CompareAndSwapWithTTL, ?ttl= alone to SetWithTTL; touch
 - `-http` flag in `burrowd serve`; both listeners shut down together
+- Your own handler tests in `api/` on `httptest.NewRecorder` or `httptest.NewServer`, graded by mutation as in 0.2 and 4.3
 
 Decisions the tests rely on:
 
@@ -42,6 +43,7 @@ Decisions the tests rely on:
 - `Expires` is `ExpiresAt` in `http.TimeFormat`. `?ttl=` is parsed with `time.ParseDuration` and must be positive.
 - The HTTP suites use keys without `/`; sending a key with `/` through `net/http.ServeMux` is not part of the contract.
 - Startup lines in order: `listening on <addr>`, then `http on <addr>`.
+- Your tests (names not starting with `TestL` plus a digit or capital) pass on your code and at least one fails against each of four mutants: (1) a failed `If-Match` answers 404 instead of 412, (2) `GET` drops the `ETag` header, (3) `?ttl=` on `PUT` is ignored, (4) an unconditional `DELETE` of a missing key answers 204. One table over `httptest.NewRecorder` with method, path, headers, body and the expected status and headers covers all four; checking `Expires` after `PUT ?ttl=` catches the third.
 
 ## The tests check
 
@@ -53,6 +55,7 @@ Decisions the tests rely on:
 - POST touch?ttl= is 204 with the unchanged ETag and extends the expiry; touch of a missing key is 404; touch without ?ttl= is 400
 - PATCH is 405 with Allow listing GET, PUT and DELETE; a 2 MiB PUT is 413; exactly 1 MiB is allowed
 - The real binary with -addr and -http: `listening on` then `http on`; a value set over frames with client.Client is readable over HTTP with its ETag and vice versa; SIGTERM exits 0
+- TestL7_1_YourTestsCatchBugs: your api tests pass on your code and fail against each of the four mutants above (412 becomes 404, ETag dropped on GET, ?ttl= ignored on PUT, unconditional DELETE of a missing key is 204)
 
 ## Try it
 
@@ -75,6 +78,6 @@ net/http is the production server; ETag/If-Match is how S3, Azure Blob and etcd'
 
 ## New in Go
 
-http.Handler and HandlerFunc · ServeMux method and path patterns (Go 1.22+) · r.PathValue · http.MaxBytesReader · errors.As with *http.MaxBytesError · conditional requests
+http.Handler and HandlerFunc · ServeMux method and path patterns (Go 1.22+) · r.PathValue · http.MaxBytesReader · errors.As with *http.MaxBytesError · conditional requests · httptest.NewRecorder vs httptest.NewServer
 
 Standard library: `net/http`, `net/http/httptest`, `strconv`, `io`, `time`

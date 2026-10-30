@@ -57,6 +57,11 @@ Decisions the tests rely on:
 - `Dial` connects and returns; it does not send a `Ping`.
 - `burrowctl get` prints the value followed by a newline. The `-ttl` flag of `cas` comes right after the word `cas`.
 
+Two traps on the way:
+
+- A typed nil is not a nil interface. `var e *ServerError; return e` from a function returning `error` gives the caller a non-nil `error` holding a nil pointer, and `err != nil` is true. Declare `var err error` and only assign a `*ServerError` when there is one, or return the literal `nil`.
+- `errors.As(err, &target)` walks the `Unwrap` chain; a type assertion `err.(*ServerError)` only looks at the outermost value and breaks the moment anyone wraps the error with `%w`. Use the assertion only when you hold the value you just made.
+
 ## The tests check
 
 - storetest.Run, storetest.RunCAS and storetest.RunTTL pass with a factory that starts a wire.Server and dials it (RunTTL is on the real clock with 60 ms TTLs)
@@ -91,6 +96,6 @@ redis-go, etcd clientv3, memcache clients: a client package whose methods mirror
 
 ## New in Go
 
-package API design · errors.As and custom error types · mapping errors across a network · mutex-guarded request/reply pairing · flag.FlagSet · subcommands
+package API design · errors.As and custom error types · errors.As vs a type assertion · the typed-nil interface trap · mapping errors across a network · mutex-guarded request/reply pairing · flag.FlagSet · subcommands
 
 Standard library: `net`, `context`, `errors`, `flag`, `os`, `time`, `strings`

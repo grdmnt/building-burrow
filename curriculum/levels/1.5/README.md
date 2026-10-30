@@ -26,6 +26,8 @@ func (m *Memory) Close() error // stops the sweeper and waits for it; safe to ca
 - `Close()` that stops it and waits, idempotent, via sync.Once and a done channel
 - Exactly-once `OnEvict`, called outside the lock
 
+This is your first goroutine. The pattern to copy for every background goroutine you write from here on: start it in the constructor, give it a `done` channel to watch in its `select`, and have `Close` close that channel (inside a `sync.Once`) and then wait for the goroutine to exit, with a `sync.WaitGroup` or a second channel the goroutine closes on its way out. Closing a channel is a broadcast: every receiver unblocks at once, which is why `done` is a channel and not a bool.
+
 Decisions the tests rely on:
 
 - A reader that notices an expired key removes it and fires `OnEvict` itself, so evictions happen with the sweeper stopped too. Whoever removes the entry under the write lock owns the callback.
@@ -53,6 +55,6 @@ Redis's active expire cycle; patrickmn/go-cache's janitor; every Go server you'l
 
 ## New in Go
 
-time.Ticker · select · goroutine lifecycle · sync.Once · callbacks outside locks · testkit.Eventually and NoLeaks
+goroutines · the go statement · time.Ticker · select · done channels · sync.WaitGroup · goroutine lifecycle · sync.Once · callbacks outside locks · testkit.Eventually and NoLeaks
 
 Standard library: `time`, `sync`, `context`

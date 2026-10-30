@@ -50,6 +50,8 @@ func (s *Server) Serve(ln net.Listener) error // wire.ServeConns underneath
 - `ReadRequest` with the RFC 9112 token rules and both size limits
 - A `Server` on `wire.ServeConns` that serves the hello page
 
+`strings.Cut(s, sep)` returns `(before, after, found)` and is the right tool for every split in this level: the request line into three fields (twice), a header line at its first `:`, the target at its `?`. It replaces the `strings.Index` plus two slices dance and never allocates a slice of parts. `strings.CutPrefix` and `CutSuffix` are the same idea for `HTTP/` and `\r`.
+
 Decisions the tests rely on:
 
 - `Header.Set` and `Add` store the name lower-cased; `Get` returns the first value; `Values` returns the stored slice, which callers must not modify.
@@ -83,6 +85,6 @@ net/http's textproto.Reader and readRequest; the same rules make nginx and Envoy
 
 ## New in Go
 
-bufio.Reader.ReadSlice · byte-level parsing · token rules from RFC 9112 · net/url for absolute targets · your own map type with methods
+bufio.Reader.ReadSlice · byte-level parsing · strings.Cut, CutPrefix and CutSuffix · token rules from RFC 9112 · net/url for absolute targets · your own map type with methods
 
 Standard library: `bufio`, `strings`, `net/url`, `net`, `log/slog`

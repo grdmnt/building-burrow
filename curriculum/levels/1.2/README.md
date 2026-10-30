@@ -16,6 +16,8 @@ Make the store safe for many goroutines. The network server in chapter 3 will ha
 - Pass `storetest.RunConcurrent` under `-race`
 - Try removing the protection and watch the race detector catch you
 
+The goroutines in this level belong to the tests; you supply the lock. Your first goroutine of your own, and the discipline of stopping it, is 1.5. Design (b) above gets you there early if you want it.
+
 ## The tests check
 
 - Runs only under the race detector (testkit.RequireRace)
@@ -38,6 +40,6 @@ go test -race (ThreadSanitizer); sync.Map exists for a narrow case (append-only 
 
 ## New in Go
 
-goroutines · sync.WaitGroup · sync.RWMutex · data races · the race detector · check-then-act · channels as an alternative to locks
+sync.RWMutex · data races · the race detector · check-then-act · channels as an alternative to locks
 
-Standard library: `sync`, `sync/atomic`
+Standard library: `sync`

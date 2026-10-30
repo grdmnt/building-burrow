@@ -1,15 +1,20 @@
 # Q.4 · The Real Thing
 
-Add a dependency on purpose, learn modules with `go.sum`, and point the same scenarios at the real Azure Service Bus emulator.
+Add a dependency on purpose and point the same scenarios at the real Azure Service Bus emulator. M.1 already taught `go get`, `go.sum` and `go mod tidy` for a tool; this is the same machinery for a library the binary links, kept in its own module so the `burrow` module stays standard-library only.
 
 ## Build
 
 ```go
-// go mod init burrow/azcompare; go get github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus
+// azcompare/go.mod is its own module: `cd azcompare && go mod init burrow/azcompare`, then
+// `go get github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus@latest`.
+// The root go.mod does not require the SDK and `go list -deps ./...` from the root stays std-only
+// (M.1's test keeps checking that). To use burrow's packages from azcompare, add a `replace burrow => ../`
+// line, or make the repo a workspace: `go work init . ./azcompare` (go.work is local, don't commit it).
+// A `tool` directive in azcompare/go.mod gives it `go tool staticcheck` too.
 ```
 
 - Emulator in Docker with config.json
-- Separate module, go.sum, go mod tidy, go vet
+- A separate module with its own `go.mod` and `go.sum`; `go mod tidy -diff` clean; a `replace` or `go.work` to reach burrow's packages
 - Port scenarios
 - Difference table
 
@@ -26,6 +31,7 @@ The suite will cover:
 ## Uses
 
 - Competing consumers (built in Q.3 · Competing Consumers)
+- Tool directive (built in M.1 · Oscilloscope)
 
 ## In the wild
 
@@ -33,6 +39,6 @@ github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus; this is also the m
 
 ## New in Go
 
-modules with dependencies · go.sum and go mod tidy · third-party SDKs · build tags for integration tests
+require vs tool directives · replace and go.work for a multi-module repo · third-party SDKs · build tags for integration tests
 
 Standard library: `azservicebus (Azure SDK; the one dependency in the curriculum)`

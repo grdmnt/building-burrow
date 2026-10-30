@@ -19,6 +19,8 @@ var ErrNoQuorum = errors.New("quorum: not enough successes")
 - Early return and cancellation
 - errors.Join of failures
 
+Constraints, since `any` is only the first one you will reach for: a type parameter's constraint is an interface, and the interface can list types as well as methods. `comparable` is the built-in constraint for anything usable as a map key or with `==`; `cmp.Ordered` (package `cmp`, Go 1.21) is `~int | ~int8 | ... | ~float64 | ~string`, the types `<` works on; and the `~T` in those unions means "any type whose underlying type is T", so a `type Term uint64` satisfies `~uint64` while a plain `uint64` constraint would reject it. Try it on the side: `func Majority[N cmp.Ordered](votes []N, need N) bool` or a `Set[K comparable]`. Raft's terms and indexes are exactly the kind of named integer types `~` exists for. `slices.Sort`, `slices.Max` and `maps.Keys` are all written this way; read their signatures.
+
 > **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/9.3/files/`, matching the earlier chapters.
 
 ## Pass when
@@ -44,6 +46,6 @@ golang.org/x/sync/errgroup (with a twist); Cassandra's quorum coordinator; this 
 
 ## New in Go
 
-generics (type parameters, generic structs) · fan-out/fan-in · context cancellation · errors.Join
+generics (type parameters, generic structs) · constraints: any, comparable, cmp.Ordered and ~T · fan-out/fan-in · context cancellation · errors.Join
 
-Standard library: `context`, `sync`, `errors`
+Standard library: `context`, `sync`, `errors`, `cmp`

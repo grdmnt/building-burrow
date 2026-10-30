@@ -11,3 +11,4 @@ testdata/fuzz/
 *.out
 *.prof
 /bin/
+tools/burrow/burrowtool

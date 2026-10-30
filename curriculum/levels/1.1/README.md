@@ -77,6 +77,6 @@ This is the shape of every Go repository interface; the Store interface here is 
 
 ## New in Go
 
-maps · pointer receivers · constructors · implicit interfaces · compile-time assertions · context.Context as first argument · slice aliasing · errors.Is · slices.Sort · t.Helper
+maps · pointer receivers · constructors · implicit interfaces · compile-time assertions · context.Context as first argument · slice aliasing · slices.Sort · t.Helper
 
 Standard library: `errors`, `bytes`, `context`, `slices`, `strings`

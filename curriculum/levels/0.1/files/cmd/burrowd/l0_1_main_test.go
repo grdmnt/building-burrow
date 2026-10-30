@@ -167,3 +167,17 @@ func TestL0_1_Gofmt(t *testing.T) {
 		t.Errorf("these files aren't gofmt-formatted (run `gofmt -w .`):\n  %s", strings.Join(bad, "\n  "))
 	}
 }
+
+func TestL0_1_Vet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipped in -short mode")
+	}
+	root, _ := filepath.Abs(filepath.Join("..", ".."))
+	cmd := exec.Command("go", "vet", "./...")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOWORK=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("`go vet ./...` reports problems. Fix them; vet only flags code that is almost certainly wrong:\n%s", out)
+	}
+}

@@ -28,6 +28,8 @@ func (s *Server) Handler() http.Handler
 - `/readyz` tied to replay
 - `//go:embed status.html` + html/template
 
+Why pprof is a trap and what `init()` has to do with it: `net/http/pprof` registers its handlers on `http.DefaultServeMux` from its `init()` function, which runs when the package is imported, so the usual `import _ "net/http/pprof"` (a blank import: run the package's `init`, use nothing from it) exposes profiling on every server that uses the default mux, API port included. `expvar` does the same for `/debug/vars`, even when imported normally. Two rules follow: never serve `DefaultServeMux` (an `http.ListenAndServe(addr, nil)` anywhere in the binary would expose both), and register `pprof.Index`, `pprof.Profile`, `pprof.Cmdline`, `pprof.Symbol`, `pprof.Trace` and `expvar.Handler()` on the admin mux yourself instead of relying on the blank import. The rule generalises: a package-level `var x = f()` and every `init()` run before `main`, in dependency order, and a blank import exists only to trigger them (`image/png` registering a decoder, a `database/sql` driver registering itself).
+
 > **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/7.6/files/`, matching the earlier chapters.
 
 ## Pass when
@@ -61,6 +63,6 @@ Prometheus client_golang instead of expvar; the admin-port pattern is Envoy's an
 
 ## New in Go
 
-expvar · net/http/pprof · slog.LevelVar · embed · html/template · liveness vs readiness
+expvar · net/http/pprof · init() and blank imports · slog.LevelVar · embed · html/template · liveness vs readiness
 
 Standard library: `expvar`, `net/http/pprof`, `log/slog`, `embed`, `html/template`

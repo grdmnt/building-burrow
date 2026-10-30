@@ -30,11 +30,15 @@ func (s *Server) Serve(ln net.Listener) error // runs on ServeConns
 //   unknown op byte      -> one OpError, then close (the stream can't be trusted)
 //   oversized frame      -> close (optionally after one OpError)
 // Requests on one connection are handled in order; each store call gets context.Background() for now.
+// A panic inside a store call must not take the server down: recover it in the connection goroutine
+// (per connection or per request), log it at Error with the panic value, and either answer OpError
+// or close that one connection. Every other connection, and Serve itself, carries on.
 ```
 
 - `wire.Server{Store, Logger}` and `Serve`
 - A per-connection loop: ReadFrame, dispatch, WriteFrame
 - The reply table above, including error mapping with errors.Is
+- A deferred `recover` in the connection goroutine, so a panicking store call costs one connection, not the process
 
 Decisions the tests rely on:
 
@@ -44,6 +48,7 @@ Decisions the tests rely on:
 - `OpTouch` is the one `OpOK` that carries `Value` and `TTL` (the ttl just set) as well as `Version`; every other `OpOK` carries only `Version`.
 - `OpValue.TTL` is the time remaining, rounded up to at least 1ns when an expiry exists, so 0 always means no expiry.
 - `OpCAS` with `TTL < 0` is `OpError`. Fields a request op does not use (a `Value` on `OpGet`) are ignored.
+- A panic in a store call is recovered in that connection's goroutine and logged at `Error`. The connection that triggered it gets an `OpError` or is closed, your choice; other open connections and new connections are unaffected and `Serve` keeps running. Note that a panic in a goroutine you started is not caught by a `recover` in the goroutine that started it: the `defer` has to be in the goroutine that panics.
 
 ## The tests check
 
@@ -60,6 +65,7 @@ Decisions the tests rely on:
 - A fake store.Store whose Get blocks on one connection doesn't delay another connection
 - Serve returns nil after the listener closes; no goroutines leak
 - OpKeys with an invalid prefix such as `a b` is served (OpKeyList, possibly empty), not OpError; OpGet with that key is OpError
+- TestL3_2_PanicInStoreIsContained: a fake Store whose Get("boom") panics. That connection gets an OpError or is closed (either passes); a connection opened before the panic and one opened after both keep working; Serve is still running
 
 ## Uses
 
@@ -75,6 +81,6 @@ A Redis server's command dispatch; net/rpc's server loop
 
 ## New in Go
 
-request/reply loops · switch on typed constants · mapping errors to replies with errors.Is · interfaces as injection points (a fake Store in tests)
+request/reply loops · switch on typed constants · mapping errors to replies with errors.Is · interfaces as injection points (a fake Store in tests) · defer and recover per goroutine · min and max for TTL rounding
 
 Standard library: `net`, `io`, `errors`, `strings`, `log/slog`

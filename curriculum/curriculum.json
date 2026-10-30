@@ -2,7 +2,7 @@
   "title": "Building Burrow",
   "go": "1.24",
   "rules": [
-    "Standard library only; the single exception is Q.4 (marked sdk: true).",
+    "Standard library only in everything that builds: tool directives (M.1) may require modules that never reach any package's import graph, and the single real exception is Q.4 (marked sdk: true, in its own module).",
     "Every test run uses -race.",
     "Each level produces exactly one part; parts are consumed by later levels (see check_graph.py).",
     "Go 1.24 minimum. Time-based suites use an injectable clock (store.WithClock + testkit.FakeClock), never testing/synctest."
@@ -30,9 +30,10 @@
             "`go mod init burrow` with `go 1.24` in go.mod (done for you)",
             "`cmd/burrowd/main.go` with `run(args, stdout, stderr) int`",
             "`version`, `help` and usage errors with the right exit codes and streams",
-            "A README line stating the rules: standard library only, every test runs with -race, database/sql is out of scope because the standard library ships no driver"
+            "A README line stating the rules: standard library only, every test runs with -race, database/sql is out of scope because the standard library ships no driver",
+            "`gofmt` and `go vet ./...` clean, from this level on"
           ],
-          "win": "`burrowd version` prints `burrowd 0.1.0` and exits 0; usage mistakes exit 2 with usage on stderr; the built binary behaves the same.",
+          "win": "`burrowd version` prints `burrowd 0.1.0` and exits 0; usage mistakes exit 2 with usage on stderr; the built binary behaves the same; gofmt and go vet are clean.",
           "go": [
             "modules",
             "package main",
@@ -40,7 +41,10 @@
             "io.Writer",
             "exit codes",
             "gofmt",
-            "go run vs go build"
+            "go vet",
+            "go run vs go build",
+            "internal/ packages",
+            "database/sql (the one to learn elsewhere)"
           ],
           "pkgs": [
             "fmt",
@@ -65,29 +69,37 @@
           "build": [
             "`store.ValidateKey(key string) error`",
             "`var ErrInvalidKey`, wrapped with context using `%w`",
-            "Your own table-driven test in `store/validate_test.go` (ungraded; the pattern is used in every level)"
+            "Your own table-driven tests in `store/` (`store/validate_test.go` is a good name), using `t.Run` subtests and `errors.Is`; they are graded by mutation, see below",
+            "An `ExampleValidateKey` with a `// Output:` comment, so `go doc` shows a worked example and `go test` checks it"
           ],
-          "win": "8 valid and 17 invalid keys classified correctly, errors wrap ErrInvalidKey, quote the key, and stay short for huge keys.",
+          "win": "8 valid and 17 invalid keys classified correctly, errors wrap ErrInvalidKey, quote the key, and stay short for huge keys; your own tests catch all five planted bugs and your example runs.",
           "go": [
             "structs",
             "slices",
             "for range over strings (runes vs bytes)",
+            "for range over int",
+            "per-iteration loop variables (Go 1.22)",
+            "min, max and clear builtins",
             "sentinel errors",
             "%w wrapping",
+            "errors.Is",
             "table-driven tests",
-            "subtests"
+            "subtests",
+            "testable examples",
+            "mutation testing (why a test must be able to fail)"
           ],
           "pkgs": [
             "testing",
             "errors",
             "fmt",
+            "strings",
             "unicode",
             "unicode/utf8"
           ],
           "hints": [
             "len(s) counts bytes, which is what the limit is in. utf8.ValidString checks encoding.",
             "`for _, r := range key` walks runes. Check unicode.IsSpace(r) || unicode.IsControl(r).",
-            "For long keys quote only a prefix: fmt.Errorf(\"%w: %q... is %d bytes\", ErrInvalidKey, key[:20], len(key))."
+            "For long keys quote only a prefix: fmt.Errorf(\"%w: %q... is %d bytes\", ErrInvalidKey, key[:20], len(key)). For your own tests, one table row per rule in the spec (250 vs 251 bytes, a tab, bad UTF-8, 126 two-byte runes) is exactly what the mutants are planted against."
           ],
           "unlock": "ValidateKey",
           "consumes": [],
@@ -130,7 +142,6 @@
             "compile-time assertions",
             "context.Context as first argument",
             "slice aliasing",
-            "errors.Is",
             "slices.Sort",
             "t.Helper"
           ],
@@ -165,8 +176,6 @@
           ],
           "win": "Race-free under the hammer: disjoint writers, a mixed Set/Get/Delete/Keys hammer over 32 hot keys, and Len/Keys during writes, with no torn values.",
           "go": [
-            "goroutines",
-            "sync.WaitGroup",
             "sync.RWMutex",
             "data races",
             "the race detector",
@@ -174,8 +183,7 @@
             "channels as an alternative to locks"
           ],
           "pkgs": [
-            "sync",
-            "sync/atomic"
+            "sync"
           ],
           "hints": [
             "A zero-value sync.RWMutex is ready to use; never copy a struct that contains one. Lock inside methods so callers can't forget.",
@@ -269,8 +277,12 @@
           ],
           "win": "The sweeper evicts 100 expired keys with no reads, OnEvict fires exactly once per key even with racing readers and may call back into the store, and no goroutine is left after Close.",
           "go": [
+            "goroutines",
+            "the go statement",
             "time.Ticker",
             "select",
+            "done channels",
+            "sync.WaitGroup",
             "goroutine lifecycle",
             "sync.Once",
             "callbacks outside locks",
@@ -317,17 +329,20 @@
           "build": [
             "`WriteRecord`, `ReadRecord`, `AppendRecord`",
             "`MaxRecordSize` and `ErrRecordTooLarge`, checked before any allocation",
-            "A fuzz target that ReadRecord never panics on"
+            "A fuzz target of your own in `wire/` (name it `FuzzRecord` or similar, not `FuzzL…`) with a seed corpus, that ReadRecord and the round trip never panic on"
           ],
-          "win": "Golden bytes match, round trips survive one-byte readers, EOF rules are exact, a 4 GiB length doesn't allocate, Write is called once per record, and the fuzzer finds nothing.",
+          "win": "Golden bytes match, round trips survive one-byte readers, EOF rules are exact, a 4 GiB length doesn't allocate, Write is called once per record, and the fuzzer finds nothing; your own fuzz target survives two seconds of fuzzing.",
           "go": [
             "encoding/binary",
             "io.ReadFull",
             "io.ErrUnexpectedEOF vs io.EOF",
             "defensive limits",
+            "arrays vs slices",
+            "copy and bytes.Clone",
+            "append and capacity",
+            "three-index slicing s[a:b:c]",
             "testing/iotest",
-            "fuzzing",
-            "append patterns"
+            "writing a fuzz target"
           ],
           "pkgs": [
             "encoding/binary",
@@ -442,14 +457,17 @@
           "build": [
             "`wire.Server{Store, Logger}` and `Serve`",
             "A per-connection loop: ReadFrame, dispatch, WriteFrame",
-            "The reply table above, including error mapping with errors.Is"
+            "The reply table above, including error mapping with errors.Is",
+            "A deferred `recover` in the connection goroutine, so a panicking store call costs one connection, not the process"
           ],
-          "win": "Every row of the reply table matches, 100 pipelined requests in one write get 100 replies in order, 40 concurrent clients see their own replies, and bad input closes only when the stream is untrustworthy.",
+          "win": "Every row of the reply table matches, 100 pipelined requests in one write get 100 replies in order, 40 concurrent clients see their own replies, and bad input closes only when the stream is untrustworthy; a store that panics takes down one connection and nothing else.",
           "go": [
             "request/reply loops",
             "switch on typed constants",
             "mapping errors to replies with errors.Is",
-            "interfaces as injection points (a fake Store in tests)"
+            "interfaces as injection points (a fake Store in tests)",
+            "defer and recover per goroutine",
+            "min and max for TTL rounding"
           ],
           "pkgs": [
             "net",
@@ -488,6 +506,8 @@
           "go": [
             "package API design",
             "errors.As and custom error types",
+            "errors.As vs a type assertion",
+            "the typed-nil interface trap",
             "mapping errors across a network",
             "mutex-guarded request/reply pairing",
             "flag.FlagSet",
@@ -694,14 +714,18 @@
           "build": [
             "CRC32 inside each record payload; verify on read",
             "Open scans, classifies torn tail vs corruption, repairs the tail",
-            "`Len` and `Truncate(n)`, maintaining a record index (offsets) built during the scan"
+            "`Len` and `Truncate(n)`, maintaining a record index (offsets) built during the scan",
+            "Your own tests in `wal/` for corruption, tail repair and Truncate, on `t.TempDir()`; graded by mutation as in 0.2"
           ],
-          "win": "The last record cut at every byte offset repairs cleanly, a bad middle record is ErrCorrupt with the file untouched, every single bit flip is caught, zeros never become records, and Truncate(n) leaves exactly n records that survive a reopen.",
+          "win": "The last record cut at every byte offset repairs cleanly, a bad middle record is ErrCorrupt with the file untouched, every single bit flip is caught, zeros never become records, and Truncate(n) leaves exactly n records that survive a reopen; your own tests catch three planted bugs in corruption handling and Truncate.",
           "go": [
             "hash/crc32",
             "File.Truncate",
+            "File.WriteAt",
             "classifying failure modes",
-            "indexes built on scan"
+            "indexes built on scan",
+            "t.TempDir",
+            "testing your own failure paths"
           ],
           "pkgs": [
             "hash/crc32",
@@ -762,22 +786,27 @@
           "idea": "Group commit: many waiters, one fsync; measured before and after",
           "difficulty": 4,
           "build": [
-            "`WithSyncFunc` and `Syncs()`",
+            "`WithSyncFunc` and `Syncs()` on an `atomic.Uint64`",
             "A writer goroutine with a request channel and per-request reply channels",
             "Sticky sync failures; Close that drains or fails in-flight appends and stops the goroutine",
-            "`BenchmarkL4_5` before/after and a CPU profile you look at"
+            "A benchmark of your own in `wal/` (not `BenchmarkL…`) using `b.Loop`, run before and after, and a CPU profile you look at"
           ],
-          "win": "Sequential appends still sync one each, 100 goroutines x 20 appends with a 2 ms sync finish in under 2 s with at most 500 syncs, a failed sync poisons the log, Close leaves nothing hanging, and the benchmark shows the difference.",
+          "win": "Sequential appends still sync one each, 100 goroutines x 20 appends with a 2 ms sync finish in under 2 s with at most 500 syncs, a failed sync poisons the log, Close leaves nothing hanging, and the benchmark shows the difference; Syncs() is race-free from other goroutines and your own benchmark runs.",
           "go": [
             "channels of request structs",
             "reply channels",
+            "channel ownership and close",
+            "for range over a channel",
+            "nil channels in select",
             "non-blocking drain with select/default",
             "backpressure",
-            "benchmarks and b.Loop",
+            "sync/atomic",
+            "writing a benchmark with b.Loop",
             "-cpuprofile and go tool pprof"
           ],
           "pkgs": [
             "sync",
+            "sync/atomic",
             "testing",
             "runtime/pprof",
             "os"
@@ -785,7 +814,7 @@
           "hints": [
             "Each Append sends request{rec, done chan error} to the writer and waits on done.",
             "Writer loop: block for one request, then drain more without blocking (select with default) up to a size limit, AppendRecord them into one buffer, write, sync once, reply to all.",
-            "Once a sync fails, remember the error and return it for every later batch without writing. Close: close the request channel, wait for the writer to exit."
+            "Once a sync fails, remember the error and return it for every later batch without writing. Close: stop new appends first, then close the request channel (only the owner closes) and wait for the writer to exit. Count syncs with atomic.Uint64.Add in the writer and read them with Load."
           ],
           "unlock": "Group commit",
           "consumes": [
@@ -879,6 +908,7 @@
           "go": [
             "bufio.Reader.ReadSlice",
             "byte-level parsing",
+            "strings.Cut, CutPrefix and CutSuffix",
             "token rules from RFC 9112",
             "net/url for absolute targets",
             "your own map type with methods"
@@ -916,7 +946,8 @@
           "go": [
             "io.LimitReader and your own io.Reader",
             "http.TimeFormat",
-            "recover",
+            "defer: argument evaluation time and LIFO order",
+            "recover through named results",
             "bytes.Buffer",
             "method values as adapters"
           ],
@@ -1001,16 +1032,18 @@
           "build": [
             "`api.Server.Handler()` on `http.ServeMux` with method patterns and `r.PathValue`",
             "`http.MaxBytesReader` for 413; If-Match mapped to CompareAndSwap, If-Match + ?ttl= to CompareAndSwapWithTTL, ?ttl= alone to SetWithTTL; touch",
-            "`-http` flag in `burrowd serve`; both listeners shut down together"
+            "`-http` flag in `burrowd serve`; both listeners shut down together",
+            "Your own handler tests in `api/` on `httptest.NewRecorder` or `httptest.NewServer`, graded by mutation as in 0.2 and 4.3"
           ],
-          "win": "The curl commands from 6.3 work unchanged, If-Match turns PUT into a CAS with 412 on mismatch, ?ttl= sets an expiry visible in Expires, and the frame port and HTTP port serve the same data.",
+          "win": "The curl commands from 6.3 work unchanged, If-Match turns PUT into a CAS with 412 on mismatch, ?ttl= sets an expiry visible in Expires, and the frame port and HTTP port serve the same data; your own httptest tests catch four planted bugs.",
           "go": [
             "http.Handler and HandlerFunc",
             "ServeMux method and path patterns (Go 1.22+)",
             "r.PathValue",
             "http.MaxBytesReader",
             "errors.As with *http.MaxBytesError",
-            "conditional requests"
+            "conditional requests",
+            "httptest.NewRecorder vs httptest.NewServer"
           ],
           "pkgs": [
             "net/http",
@@ -1052,6 +1085,7 @@
             "DisallowUnknownFields",
             "json.Marshaler/Unmarshaler",
             "pointer fields for optional values",
+            "omitempty vs omitzero (Go 1.24)",
             "[]byte as base64",
             "content negotiation"
           ],
@@ -1082,13 +1116,15 @@
           "build": [
             "`Middleware`, `Chain`",
             "`RequestID`, `AccessLog`, `Recover`",
-            "A ResponseWriter wrapper by embedding"
+            "A ResponseWriter wrapper by embedding, with `Unwrap() http.ResponseWriter`"
           ],
           "win": "Every request logs one JSON line with id, method, path, status and duration; a panicking handler returns a JSON 500 with the request id and the server keeps serving.",
           "go": [
             "closures",
             "decorators",
             "embedding an interface in a struct",
+            "comma-ok type assertions",
+            "Unwrap() and http.NewResponseController",
             "context values with unexported key types",
             "structured logging"
           ],
@@ -1100,7 +1136,7 @@
             "runtime/debug"
           ],
           "hints": [
-            "To capture the status, embed http.ResponseWriter in your own struct and override WriteHeader and Write.",
+            "To capture the status, embed http.ResponseWriter in your own struct and override WriteHeader and Write; add `func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }` so http.NewResponseController can still Flush through you.",
             "Use an unexported type for context keys: `type ctxKey struct{}`.",
             "Put Recover outermost so it also catches panics in your other middleware."
           ],
@@ -1204,6 +1240,7 @@
           "go": [
             "expvar",
             "net/http/pprof",
+            "init() and blank imports",
             "slog.LevelVar",
             "embed",
             "html/template",
@@ -1330,7 +1367,8 @@
           "win": "curl -N prints an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.",
           "go": [
             "server-sent events",
-            "flushing",
+            "flushing through wrappers (Unwrap, NewResponseController, comma-ok Flusher)",
+            "per-event write deadlines",
             "request context cancellation"
           ],
           "pkgs": [
@@ -1347,7 +1385,8 @@
           "unlock": "Watch API",
           "consumes": [
             "Broker",
-            "JSON API"
+            "JSON API",
+            "Middleware chain"
           ],
           "wild": "SSE as used by OpenAI/Anthropic streaming APIs and Kubernetes watch (chunked JSON); WebSockets when you need duplex"
         },
@@ -1525,6 +1564,7 @@
           "win": "3 of 5 slow-fast mixed calls return as soon as 3 succeed, the two slow ones observe cancellation, 3 failures out of 5 give ErrNoQuorum immediately, and the goroutine count is flat after 1,000 rounds.",
           "go": [
             "generics (type parameters, generic structs)",
+            "constraints: any, comparable, cmp.Ordered and ~T",
             "fan-out/fan-in",
             "context cancellation",
             "errors.Join"
@@ -1532,7 +1572,8 @@
           "pkgs": [
             "context",
             "sync",
-            "errors"
+            "errors",
+            "cmp"
           ],
           "hints": [
             "Buffer the results channel to n so late replies never block a goroutine.",
@@ -1571,11 +1612,14 @@
             "Roles and terms",
             "RequestVote RPC and reply handling",
             "Election timer with jitter, heartbeat timer",
-            "The select loop"
+            "The select loop over one inbox `chan Message` plus timers, with a type switch on a sealed interface and a labeled break to leave it"
           ],
           "win": "Three nodes elect exactly one leader within 2 s; kill it and a new leader with a higher term appears within 3 s; -count=100 never shows two leaders in one term.",
           "go": [
             "actor-style state ownership",
+            "one inbox channel of a sealed interface",
+            "type switches",
+            "labeled break and continue",
             "select over many channels",
             "timer resets",
             "reading a spec"
@@ -1586,7 +1630,7 @@
             "context"
           ],
           "hints": [
-            "Figure 2 of the Raft paper is the spec. Keep it open.",
+            "One goroutine, one inbox: RPC handlers and Status() send a Message (with a reply channel when they need an answer) and never touch Node's fields. `type Message interface{ isMessage() }` with an unexported method keeps the set closed, so `switch m := m.(type)` covers every case.",
             "One goroutine owning the state replaces most locks; this is the pattern 1.2's third hint offered, and it will feel like a GenServer.",
             "Send RequestVotes with quorum.Call[bool] and k = majority; the result arrives as one event in your select loop."
           ],
@@ -1899,11 +1943,16 @@
           "build": [
             "The scenario runner",
             "Replayable seeds",
+            "A release build: `-ldflags \"-X main.version=…\"` stamping the version, `-trimpath`, and cross-compiling with `GOOS`/`GOARCH` for a machine you don't have",
             "A README for Burrow"
           ],
           "win": "10 consecutive seeded runs pass the checker with zero violations, using only the Go standard library.",
           "go": [
-            "everything so far"
+            "everything so far",
+            "-ldflags -X",
+            "GOOS and GOARCH cross-compilation",
+            "-trimpath",
+            "go version -m"
           ],
           "pkgs": [
             "everything so far"
@@ -1926,6 +1975,58 @@
             "Durable daemon"
           ],
           "wild": "Jepsen; FoundationDB's simulation; TigerBeetle's VOPR"
+        }
+      ]
+    },
+    {
+      "key": "M",
+      "name": "Toolchain",
+      "optional": true,
+      "needs": [
+        "0"
+      ],
+      "line": "Optional, one level. A tool dependency that never reaches the binary, and the module-management reading every work project needs.",
+      "pos": {
+        "row": 3,
+        "col": 4,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "M.1",
+          "title": "Oscilloscope",
+          "brief": "Add staticcheck as a Go 1.24 tool directive, learn what go.sum and go mod tidy are for, and prove the binary stays standard-library only.",
+          "idea": "A tool dependency: in go.mod and go.sum, never in the import graph",
+          "difficulty": 1,
+          "build": [
+            "`go get -tool honnef.co/go/tools/cmd/staticcheck@latest` in the root module: a `tool` directive, `require` lines and a `go.sum`",
+            "`go mod tidy -diff` clean, `go tool -n staticcheck` resolving, `go tool staticcheck ./...` running",
+            "Fix what staticcheck reports (ungraded, but do it: every finding on this codebase so far is real)",
+            "Read the rest of this page; none of it is graded, all of it will come up at work"
+          ],
+          "win": "go.mod has the tool directive, go.sum covers it, go mod tidy -diff is silent, go tool staticcheck runs, and go list -deps still shows nothing outside the standard library.",
+          "go": [
+            "go get -tool and the tool directive",
+            "go.sum and the checksum database",
+            "go mod tidy and -diff",
+            "go mod why",
+            "GOPROXY, GOSUMDB and GOPRIVATE",
+            "go tool, go run pkg@version",
+            "govulncheck",
+            "go generate",
+            "go work"
+          ],
+          "pkgs": [
+            "none new; the Go command itself"
+          ],
+          "hints": [
+            "`go get -tool honnef.co/go/tools/cmd/staticcheck@latest` writes the tool line, the require lines and go.sum in one go. Never edit go.sum by hand.",
+            "`go mod tidy -diff` prints what tidy would change and exits 1 if there is anything; run `go mod tidy`, then `git diff go.mod go.sum` to see what moved.",
+            "`go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{end}}' ./...` prints nothing when the module is std-only: tool requirements are not imports."
+          ],
+          "unlock": "Tool directive",
+          "consumes": [],
+          "wild": "Every Go repo at work has this go.mod shape; before Go 1.24 the same thing was done with a `tools.go` file of blank imports behind a build tag, which you will still see; golangci-lint bundles staticcheck with a hundred other checkers"
         }
       ]
     },
@@ -2135,6 +2236,154 @@
       ]
     },
     {
+      "key": "S",
+      "name": "TLS & Auth",
+      "optional": true,
+      "needs": [
+        "7",
+        "9"
+      ],
+      "line": "Optional. Certificates minted in code, TLS on the API, bearer tokens compared in constant time, and mutual TLS between peers.",
+      "pos": {
+        "row": 6,
+        "col": 4,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "S.1",
+          "title": "Shielded Cable",
+          "brief": "A pki package that mints a CA and leaf certificates in code, TLS on the HTTP API, a client that trusts a CA, and HTTP/2 negotiated for free.",
+          "idea": "TLS from certificates you mint yourself with crypto/x509, and what ALPN gives you",
+          "difficulty": 3,
+          "build": [
+            "`pki.NewCA`, `Issue`, `Pool`, `CertPEM`, `WriteFiles`, `ServerConfig`: a CA and leaves from `crypto/x509`, `crypto/ecdsa`, `crypto/rand`, `encoding/pem`",
+            "`burrowd serve -tls-cert -tls-key` → `http.Server.ServeTLS`, `https on <addr>`",
+            "`burrow.Options.RootCAs` and `burrowctl -cacert`; HTTP/2 negotiated, which the tests check through `resp.Proto`",
+            "Your own test that issues a cert from a fresh CA and verifies it with `x509.Certificate.Verify`"
+          ],
+          "win": "burrowd serves the API over https with a certificate minted by pki, curl needs --cacert and gets HTTP/2, a client without the CA is refused with an x509 error, and the frame port behaves exactly as before.",
+          "go": [
+            "crypto/x509 templates and CreateCertificate",
+            "crypto/ecdsa and elliptic.P256",
+            "encoding/pem",
+            "tls.Certificate and X509KeyPair",
+            "tls.Config: MinVersion, RootCAs, NextProtos",
+            "http.Server.ServeTLS",
+            "http.Transport.TLSClientConfig and ForceAttemptHTTP2",
+            "x509 error types with errors.As",
+            "file modes with os.WriteFile"
+          ],
+          "pkgs": [
+            "crypto/x509",
+            "crypto/ecdsa",
+            "crypto/elliptic",
+            "crypto/rand",
+            "crypto/tls",
+            "encoding/pem",
+            "math/big",
+            "net",
+            "net/http"
+          ],
+          "hints": [
+            "Two templates: the CA with IsCA, BasicConstraintsValid and KeyUsageCertSign, signed by itself (parent == template); the leaf with DNSNames/IPAddresses, KeyUsageDigitalSignature and ExtKeyUsage, signed by the CA. x509.CreateCertificate returns DER; x509.ParseCertificate turns it back into a *Certificate for the CA struct.",
+            "tls.Certificate{Certificate: [][]byte{leafDER}, PrivateKey: key} is the in-memory form; pem.Encode with Type CERTIFICATE / PRIVATE KEY (x509.MarshalPKCS8PrivateKey) is the file form, and tls.X509KeyPair reads it back.",
+            "On the client: build the Transport yourself with TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13} and ForceAttemptHTTP2: true; without the last one a custom Transport speaks HTTP/1.1 only."
+          ],
+          "unlock": "TLS API",
+          "consumes": [
+            "HTTP client lib",
+            "Deadline guard"
+          ],
+          "wild": "mkcert and step-ca do what pki does; cert-manager and Let's Encrypt's autocert (golang.org/x/crypto/acme/autocert) issue the real ones; every Go HTTPS server is http.Server.ServeTLS or a tls.Listener"
+        },
+        {
+          "id": "S.2",
+          "title": "Keycard",
+          "brief": "Bearer tokens on the API: a token file, constant-time lookup, read and write roles, a principal in the context and the access log, and a client that sends the token.",
+          "idea": "Authentication as middleware, with the comparison done in constant time",
+          "difficulty": 2,
+          "build": [
+            "`ParseTokens`, `TokenSet.Lookup` with `sha256` + `subtle.ConstantTimeCompare` over every entry",
+            "`Auth` middleware: 401 with `WWW-Authenticate`, 403 for read tokens on writes, principal in context and in the access log",
+            "`-auth-tokens`/`-auth-insecure` in `burrowd serve`; `Options.Token`; `burrowctl -token` / `BURROW_TOKEN`"
+          ],
+          "win": "A request without a token is 401 with WWW-Authenticate, a read token can GET but gets 403 on PUT, a write token does everything, the access log names the principal and never the token, and burrowd refuses to combine tokens with plaintext unless told to.",
+          "go": [
+            "crypto/subtle.ConstantTimeCompare",
+            "crypto/sha256",
+            "timing side channels",
+            "roles and a principal in context",
+            "WWW-Authenticate and 401 vs 403",
+            "r.TLS as a connection property",
+            "environment variables as defaults for flags"
+          ],
+          "pkgs": [
+            "crypto/subtle",
+            "crypto/sha256",
+            "bufio",
+            "net/http",
+            "context",
+            "os"
+          ],
+          "hints": [
+            "Store [32]byte digests, not tokens. Lookup: hash the input once, then `match |= subtle.ConstantTimeCompare(h[:], stored[:])` across every entry, remembering the index of the match, and only decide after the loop.",
+            "Split the header with strings.Cut on the first space; strings.EqualFold(scheme, \"Bearer\"). Missing or bad credentials are 401 with the WWW-Authenticate header set before writeJSON; a known principal with the wrong role is 403.",
+            "r.TLS is nil on a plaintext connection, which is all the check you need. Put Auth inside AccessLog in the chain so the log line can read the principal from the context after the handler ran."
+          ],
+          "unlock": "Bearer auth",
+          "consumes": [
+            "TLS API",
+            "Middleware chain",
+            "HTTP client lib"
+          ],
+          "wild": "Every API-key scheme (Stripe, GitHub PATs) is this middleware; OAuth2 bearer tokens (RFC 6750) use the same header and the same 401/403 split; hmac.Equal and subtle.ConstantTimeCompare are what webhook verification is built on"
+        },
+        {
+          "id": "S.3",
+          "title": "Handshake",
+          "brief": "Mutual TLS between cluster peers with per-node certificates and a membership check in the handshake, then devcluster -secure wiring the whole chapter together.",
+          "idea": "Identity for machines: a certificate per node, verified in both directions, with membership checked during the handshake",
+          "difficulty": 4,
+          "build": [
+            "`PeerServerConfig`, `PeerClientConfig`, `AllowNames`: `ClientAuth: tls.RequireAndVerifyClientCert`, `ClientCAs`, and `VerifyConnection` (or `VerifyPeerCertificate`) for the allow check",
+            "`rpc.Server.TLS` and `rpc.DialTLS`; the 9.2 code path untouched when `TLS` is nil",
+            "`-peer-*` flags in `burrowd serve`, threaded into Raft's transport",
+            "`devcluster -secure`"
+          ],
+          "win": "Three nodes elect a leader and replicate over mutual TLS, a client with a certificate from another CA or with a CN that is not a peer is refused during the handshake, plaintext dials fail fast, and `devcluster -secure` brings the whole thing up with burrowctl talking to it over https with a token.",
+          "go": [
+            "tls.Config.ClientAuth and ClientCAs",
+            "VerifyConnection and tls.ConnectionState",
+            "ServerName as identity",
+            "tls.NewListener and tls.Dialer",
+            "threading configuration through layers",
+            "generating and placing secrets at startup"
+          ],
+          "pkgs": [
+            "crypto/tls",
+            "crypto/x509",
+            "net",
+            "os",
+            "path/filepath"
+          ],
+          "hints": [
+            "Server side: &tls.Config{Certificates: {cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: ca.Pool(), MinVersion: tls.VersionTLS13, VerifyConnection: func(cs tls.ConnectionState) error { return allow(cs.PeerCertificates[0]) }}. The chain is already verified when VerifyConnection runs.",
+            "Client side: &tls.Config{Certificates: {cert}, RootCAs: ca.Pool(), ServerName: peerID}. rpc.Server only needs `if s.TLS != nil { ln = tls.NewListener(ln, s.TLS) }` before the accept loop; DialTLS is (&tls.Dialer{Config: cfg}).DialContext.",
+            "devcluster -secure: pki.NewCA, one Issue per node with hosts {id, \"localhost\", \"127.0.0.1\"} and both ExtKeyUsages, WriteFiles into the work dir, and the flags appended to each node's argv. Print `ca` and `token` before `cluster ready` so the tests can parse them."
+          ],
+          "unlock": "Secure cluster",
+          "consumes": [
+            "TLS API",
+            "Bearer auth",
+            "RPC",
+            "devcluster"
+          ],
+          "wild": "etcd's --peer-client-cert-auth and --peer-trusted-ca-file; Consul and Nomad's auto-encrypt; SPIFFE/SPIRE issue exactly this kind of per-node identity, with the ID in a URI SAN instead of the CN; Istio does it per pod"
+        }
+      ]
+    },
+    {
       "key": "D",
       "name": "Eventually Consistent",
       "optional": true,
@@ -2256,9 +2505,10 @@
       "name": "Queues",
       "optional": true,
       "needs": [
-        "5"
+        "5",
+        "M"
       ],
-      "line": "Optional. Azure Service Bus fundamentals built on your own parts: a durable queue, peek-lock as a lease, competing consumers, then the real thing.",
+      "line": "Optional. Azure Service Bus fundamentals built on your own parts: a durable queue, peek-lock as a lease, competing consumers, then the real thing in its own module.",
       "pos": {
         "row": 4,
         "col": 4,
@@ -2375,19 +2625,19 @@
         {
           "id": "Q.4",
           "title": "The Real Thing",
-          "brief": "Add one dependency on purpose and run the same scenarios against the Azure Service Bus emulator.",
+          "brief": "Add one dependency on purpose, in its own module, and run the same scenarios against the Azure Service Bus emulator; the go.mod machinery is the one M.1 taught for tools.",
           "idea": "Adding a dependency on purpose: modules with go.sum, and a scenario suite that runs against both your broker and the Azure Service Bus emulator",
           "difficulty": 2,
           "build": [
             "Emulator in Docker with config.json",
-            "Separate module, go.sum, go mod tidy, go vet",
+            "A separate module with its own `go.mod` and `go.sum`; `go mod tidy -diff` clean; a `replace` or `go.work` to reach burrow's packages",
             "Port scenarios",
             "Difference table"
           ],
           "win": "The same scenario suite passes against Burrow and the emulator, or fails in ways your table explains.",
           "go": [
-            "modules with dependencies",
-            "go.sum and go mod tidy",
+            "require vs tool directives",
+            "replace and go.work for a multi-module repo",
             "third-party SDKs",
             "build tags for integration tests"
           ],
@@ -2401,7 +2651,8 @@
           ],
           "unlock": "Service Bus fluency",
           "consumes": [
-            "Competing consumers"
+            "Competing consumers",
+            "Tool directive"
           ],
           "wild": "github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus; this is also the module-management lesson for every work project",
           "sdk": true

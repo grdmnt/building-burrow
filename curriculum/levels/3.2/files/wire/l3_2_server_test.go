@@ -308,3 +308,48 @@ func TestL3_2_NoLeaks(t *testing.T) {
 	ln.Close()
 	<-done
 }
+
+// panickyStore panics when asked for the key "boom".
+type panickyStore struct{ store.Store }
+
+func (p panickyStore) Get(ctx context.Context, k string) (store.Entry, error) {
+	if k == "boom" {
+		panic("store exploded")
+	}
+	return p.Store.Get(ctx, k)
+}
+
+// A panic in a connection goroutine kills the whole process unless that
+// goroutine recovers it. If this test crashes the test binary with
+// "panic: store exploded", that's the bug.
+func TestL3_2_PanicInStoreIsContained(t *testing.T) {
+	addr := startFrameServer(t, panickyStore{store.NewMemory()})
+	other := dial(t, addr)
+	other.SetDeadline(time.Now().Add(5 * time.Second))
+	if r := roundTrip(t, other, wire.Frame{Op: wire.OpPing}); r.Op != wire.OpPong {
+		t.Fatalf("ping before the panic: got %v", r.Op)
+	}
+
+	bad := dial(t, addr)
+	bad.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := wire.WriteFrame(bad, wire.Frame{Op: wire.OpGet, Key: "boom"}); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := wire.ReadFrame(bad)
+	var ne net.Error
+	switch {
+	case errors.As(err, &ne) && ne.Timeout():
+		t.Errorf("after the store panicked the connection got neither an OpError nor closed")
+	case err == nil && resp.Op != wire.OpError:
+		t.Errorf("after the store panicked the reply should be OpError (or the connection closed), got %v", resp.Op)
+	}
+
+	if r := roundTrip(t, other, wire.Frame{Op: wire.OpPing}); r.Op != wire.OpPong {
+		t.Errorf("another open connection should keep working after one request panics, got %v", r.Op)
+	}
+	fresh := dial(t, addr)
+	fresh.SetDeadline(time.Now().Add(5 * time.Second))
+	if r := roundTrip(t, fresh, wire.Frame{Op: wire.OpPing}); r.Op != wire.OpPong {
+		t.Errorf("new connections should still be served after a panic, got %v", r.Op)
+	}
+}

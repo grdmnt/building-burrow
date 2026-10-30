@@ -58,7 +58,8 @@ Your code goes at the repo root (`cmd/`, `store/`, `wire/`, `wal/`, `durable/`, 
 
 ## Rules
 
-- Standard library only. The single exception is the optional Q.4 level, which uses the Azure Service Bus SDK in its own module.
+- Standard library only in the code you build. Tool dependencies (the optional M.1 level adds staticcheck with `go get -tool`) never reach the binary, and the optional Q.4 level uses the Azure Service Bus SDK in its own module.
+- You write tests too. From 0.2 on, some levels grade your own tests by planting bugs in copies of your code (mutants) and checking your tests catch them.
 - You write all the implementation. Tests, hints and reviews come from the curriculum (and Claude).
 - Every test run uses `-race`.
 - Time-based levels take an injectable clock (`store.WithClock`); the tests drive a `testkit.FakeClock`.
@@ -70,7 +71,7 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 
 | | Chapter | Levels | What you build |
 |---|---|---|---|
-| 0 | Boot Sector | 2 | the module, a testable `main`, table-driven tests, `ValidateKey` |
+| 0 | Boot Sector | 2 | the module, a testable `main`, `go vet`, `ValidateKey` and your first graded table-driven tests |
 | 1 | Memory | 5 | the `store.Store` contract and its Memory engine: mutex, versions and CAS, expiry on an injectable clock, a janitor |
 | 2 | Codec | 2 | a length-prefixed record codec and the KV frame on top of it |
 | 3 | Wire | 5 | an accept loop, a frame server, a client that is itself a Store, deadlines, graceful shutdown and `burrowd serve` |
@@ -82,9 +83,11 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 | 9 | Cluster | 3 | devcluster, multiplexed RPC on your codec, a generic quorum helper |
 | 10 | Consensus | 6 | Raft: election, log shipping, the apply loop feeding watch, leader following, read index, persistence on your WAL |
 | 11 | Chaos | 4 | a fault-injecting proxy, a history recorder, a checker, and the final boss |
+| M | Toolchain | 1 | optional: a `tool` directive for staticcheck, go.sum, `go mod tidy`, and proof the binary stays standard-library only |
 | H | HTTP Deep Cuts | 3 | optional: keep-alive, chunked streaming, hardening and conformance |
 | T | Traffic Control | 2 | optional: a token bucket, a generic LRU with single-flight |
+| S | TLS & Auth | 3 | optional: TLS and HTTP/2 on the API, bearer tokens, mutual TLS between cluster peers |
 | D | Eventually Consistent | 3 | optional epilogue: a hash ring, quorum replication, and the checker catching it |
 | Q | Queues | 4 | optional: a durable queue broker, peek-lock, competing consumers, then the real Azure Service Bus |
 
-47 mandatory levels, 12 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts chapter have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).
+47 mandatory levels, 16 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts and Toolchain chapters have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).

@@ -40,6 +40,13 @@ func (w *ResponseWriter) Write(p []byte) (int, error)
 - `Request.Body` as a length-enforcing reader; `MaxBodyBytes`
 - 204/304/HEAD rules, reason phrases, Date header; `recover` to 500
 
+`defer`, precisely, because the panic-to-500 path depends on it:
+
+- The deferred call's arguments are evaluated at the `defer` statement, not when it runs. `defer log.Println(status)` logs the status as it was then; `defer func() { log.Println(status) }()` logs it as it is at exit. The same applies to the receiver of a method value.
+- Deferred calls run last-in, first-out, after the `return` expression has been evaluated but before the function actually returns.
+- Which is why a deferred `recover` can only change what the caller sees through named results: `func serve(w, r) (err error) { defer func() { if p := recover(); p != nil { err = fmt.Errorf("panic: %v", p) } }(); ... }`. Without the named result, the recovery swallows the panic and the function returns the zero value.
+- `recover()` returns non-nil only when called directly by a deferred function during a panic. Calling it from a helper the deferred function calls does nothing.
+
 Decisions the tests rely on:
 
 - `Date` uses `http.TimeFormat` in UTC. The default `Content-Type` is only added when the body is non-empty.
@@ -69,6 +76,6 @@ net/http's response and body types; the panic-to-500 behaviour you get for free 
 
 ## New in Go
 
-io.LimitReader and your own io.Reader · http.TimeFormat · recover · bytes.Buffer · method values as adapters
+io.LimitReader and your own io.Reader · http.TimeFormat · defer: argument evaluation time and LIFO order · recover through named results · bytes.Buffer · method values as adapters
 
 Standard library: `io`, `strconv`, `time`, `fmt`, `bytes`

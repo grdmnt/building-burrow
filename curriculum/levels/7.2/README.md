@@ -68,6 +68,8 @@ Decisions the tests rely on:
 - `ttl` must be a JSON string such as `"10s"`; a bare number is 400 `invalid_request`.
 - `Duration` marshals as `time.Duration.String()`; a negative duration is `invalid_request`; zero is omitted.
 
+`omitempty` omits a nil pointer, an empty string, slice or map, and a zero number, but never a zero struct, which is why `ExpiresAt` is a `*time.Time`. Go 1.24 adds `omitzero`: `json:"expires_at,omitzero"` omits a `time.Time` whose `IsZero()` reports true (any type's `IsZero() bool` method is honoured, otherwise the zero value is compared). Keep the pointer here because the tests read it, but reach for `omitzero` in your own code; for the `Duration` fields either tag works, since zero is a number.
+
 ## The tests check
 
 - GET with Accept: application/json returns key, base64 value and version; expires_at is omitted without a TTL and is RFC 3339 UTC with one; an empty value encodes as `"value": ""`; without the Accept header the 7.1 octet-stream response is unchanged
@@ -97,6 +99,6 @@ encoding/json (json/v2 is coming as an experiment in later Go releases); go-play
 
 ## New in Go
 
-struct tags · json.Decoder vs json.Unmarshal · DisallowUnknownFields · json.Marshaler/Unmarshaler · pointer fields for optional values · []byte as base64 · content negotiation
+struct tags · json.Decoder vs json.Unmarshal · DisallowUnknownFields · json.Marshaler/Unmarshaler · pointer fields for optional values · omitempty vs omitzero (Go 1.24) · []byte as base64 · content negotiation
 
 Standard library: `encoding/json`, `net/http`, `io`, `mime`, `strings`

@@ -27,6 +27,13 @@ func run(args []string, stdout, stderr io.Writer) int
 - `cmd/burrowd/main.go` with `run(args, stdout, stderr) int`
 - `version`, `help` and usage errors with the right exit codes and streams
 - A README line stating the rules: standard library only, every test runs with -race, database/sql is out of scope because the standard library ships no driver
+- `gofmt` and `go vet ./...` clean, from this level on
+
+Worth knowing now:
+
+- `burrow start` put a helper package at `internal/testkit`. A package under a directory named `internal` can only be imported from inside the tree rooted at that directory's parent: `burrow/internal/testkit` is importable by every package in the `burrow` module and by nobody outside it. That is the whole mechanism; there is no keyword. Use it for your own helpers too.
+- `database/sql` is the one everyday standard-library package this curriculum never touches, because the standard library ships no driver and the rule is standard library only. Learn it on a work project; the shape (`sql.DB` is a pool, `QueryContext`, `Scan`, always close `Rows`) is a day's reading once you know Go.
+- `go vet` is the compiler's suspicious cousin: it catches `Printf` verbs that don't match their arguments, copied locks, unreachable code and misuse of `context`. It runs as part of `go test` for a small subset of checks; the full set is `go vet ./...`, which 0.1's tests run over the whole module.
 
 ## The tests check
 
@@ -36,12 +43,14 @@ func run(args []string, stdout, stderr io.Writer) int
 - The unknown-command and unknown-flag messages name the offending token
 - `go build` the real binary and check `main` passes run()'s result to os.Exit (exit status 2 for `bogus`)
 - Every .go file outside curriculum/ is gofmt-clean
+- `go vet ./...` over the whole module reports nothing (a sibling of the gofmt test; both keep running against everything you write later)
 
 ## Try it
 
 ```bash
 go run ./cmd/burrowd version
 go run ./cmd/burrowd bogus; echo "exit: $?"
+gofmt -l . && go vet ./...
 ```
 
 ## Uses
@@ -54,6 +63,6 @@ spf13/cobra and urfave/cli generate this shape; the run(args, stdout, stderr) pa
 
 ## New in Go
 
-modules · package main · os.Args · io.Writer · exit codes · gofmt · go run vs go build
+modules · package main · os.Args · io.Writer · exit codes · gofmt · go vet · go run vs go build · internal/ packages · database/sql (the one to learn elsewhere)
 
 Standard library: `fmt`, `os`, `io`

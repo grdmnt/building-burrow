@@ -23,11 +23,13 @@ func (l *Log) Truncate(n int) error    // keep the first n records, discard the 
 - CRC32 inside each record payload; verify on read
 - Open scans, classifies torn tail vs corruption, repairs the tail
 - `Len` and `Truncate(n)`, maintaining a record index (offsets) built during the scan
+- Your own tests in `wal/` for corruption, tail repair and Truncate, on `t.TempDir()`; graded by mutation as in 0.2
 
 Decisions the tests rely on:
 
 - The CRC is IEEE over `rec`, stored big-endian in the 4 bytes before `rec`, inside the record payload.
 - `Len` counts only good records; `Open` repairs the tail before `Len` is computed. `Truncate(n)` with `n < 0` or `n > Len()` is an error.
+- Your tests (names not starting with `TestL` plus a digit or capital) pass on your code, create every log file under `t.TempDir()` (never in the package directory, never in `os.TempDir()` by hand), and at least one of them fails against each of three mutants: (1) corruption in the middle of the log is silently truncated away instead of returning `ErrCorrupt`, (2) torn-tail repair drops one extra good record, (3) `Truncate(n)` keeps `n+1` records. Write the file, damage the bytes with `os.WriteFile` or `os.OpenFile` + `WriteAt`, reopen, and assert on `Len` and the error.
 
 ## The tests check
 
@@ -39,6 +41,7 @@ Decisions the tests rely on:
 - Len is 0 for a new log and 5 after 5 appends; Truncate(3) leaves 3; appends after Truncate are visible; Truncate past the end and Truncate(-1) are errors; after a reopen Len is right; Truncate(0) leaves an empty file; Truncate after Close is ErrClosed
 - Len counts good records after the torn tail is repaired
 - Truncate is durable: a child process truncates to 6 records, prints `done`, and is SIGKILLed; the parent sees exactly 6
+- TestL4_3_YourTestsCatchBugs: your wal tests use t.TempDir(), pass on your code, and fail against each of the three mutants above (mid-log corruption silently truncated, tail repair drops one good record, Truncate keeps n+1)
 
 ## Uses
 
@@ -50,6 +53,6 @@ etcd's wal records carry a CRC; Kafka segments; SQLite's WAL frames have checksu
 
 ## New in Go
 
-hash/crc32 · File.Truncate · classifying failure modes · indexes built on scan
+hash/crc32 · File.Truncate · File.WriteAt · classifying failure modes · indexes built on scan · t.TempDir · testing your own failure paths
 
 Standard library: `hash/crc32`, `os`, `io`
