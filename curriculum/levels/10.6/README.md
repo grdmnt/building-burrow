@@ -46,6 +46,12 @@ A hundred handlers doing this at once is the burst 4.5's writer goroutine turns 
 
 **Snapshotter (4.4 · Compaction).** `Memory.Snapshot()` returns a consistent copy of every live entry, and 4.4's write-tmp, fsync, rename, fsync-the-directory sequence makes `snapshot.db` appear atomically. The Raft snapshot adds one thing to the front: the index and term of the last entry it includes.
 
+```go
+entries := mem.Snapshot() // the *store.Memory under raft.KV (4.4)
+// write lastIndex, lastTerm, then the 4.4 format (gob + crc32)
+// to snapshot.tmp; fsync; rename to snapshot.db; fsync the dir
+```
+
 ## What's new here
 
 **Durability ordering.** The rule is "persist, then reply". Why it is not negotiable:

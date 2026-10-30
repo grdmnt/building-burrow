@@ -17,9 +17,27 @@ err := c.do(ctx, "PUT", "/v1/kv/"+url.PathEscape(key),
 // kv.Version, kv.ExpiresAt -> store.Entry
 ```
 
-**Deadline guard (7.4 · Watchdog).** The server answers `503 unavailable` when a request runs past its budget and drops connections that idle too long. The client treats `503` as retryable (for idempotent calls) and gives every request its own `ctx`, so the caller's deadline, not the server's, decides how long to wait.
+**Deadline guard (7.4 · Watchdog).** The server answers `503 unavailable` when a request runs past its budget and drops connections that idle too long. The client treats `503` as retryable (for idempotent calls) and gives every request its own `ctx`, so the caller's deadline, not the server's, decides how long to wait:
 
-**Frame client (3.3 · Remote Store).** The method set is the same as `client.Client`'s, and the same conformance suites (`storetest.Run`, `RunCAS`, `RunTTL`) judge it. `burrowctl` keeps its subcommands and output; `-http` just swaps which client it builds.
+```go
+ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+defer cancel()
+_, err := c.Get(ctx, "k") // gives up at 200 ms, whatever the server
+```
+
+**Frame client (3.3 · Remote Store).** The method set is the same as `client.Client`'s, and the same conformance suites (`storetest.Run`, `RunCAS`, `RunTTL`) judge it, with a factory that starts a real HTTP server and points a client at it:
+
+```go
+storetest.Run(t, func(t *testing.T) store.Store {
+	srv := httptest.NewServer(
+		(&api.Server{Store: store.NewMemory()}).Handler())
+	t.Cleanup(srv.Close)
+	c, _ := burrow.New(srv.URL, burrow.Options{})
+	return c
+})
+```
+
+`burrowctl` keeps its subcommands and output; `-http` just swaps which client it builds.
 
 ## What's new here
 
