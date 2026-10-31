@@ -8,15 +8,20 @@ Let a watch client reconnect and pick up exactly where it left off. The broker k
 
 ## What you're using from before
 
-**Watch API (8.3 · Event Stream).** The `GET /v1/watch` handler and the `Broker` it subscribes to. This level changes both: `NewBroker` grows a `history` size (its options, `WithStartID` included, stay) and a `SubscribeFrom` method, and the handler reads `Last-Event-ID` and picks `SubscribeFrom` over `Subscribe` when it is present. The event loop, flushing and heartbeats stay as they are. Plain `Subscribe(prefix)` keeps working for callers that want live events only:
+**Watch API (8.3 · Event Stream).** The `GET /v1/watch` handler and the `Broker` it subscribes to. This level changes both: `NewBroker` grows a `history` size (its options, `WithStartID` included, stay) and a `SubscribeFrom` method, and the handler reads `Last-Event-ID` and picks `SubscribeFrom` over `Subscribe` when it is present. The event loop, flushing, heartbeats and the opening `ready` event stay as they are. Plain `Subscribe(prefix)` keeps working for callers that want live events only:
 
 ```go
 after, _ := strconv.ParseUint(r.Header.Get("Last-Event-ID"), 10, 64)
 ch, stop, err := s.Broker.SubscribeFrom(prefix, after)
+if err == nil {
+	// ready with id: after, then replayed and live events
+}
 if errors.Is(err, watch.ErrCannotResume) {
-	// write `event: reset` then fall back to a live Subscribe
+	// write `event: reset`, then a live Subscribe and its ready
 }
 ```
+
+The `ready` ID always means the same thing: "you have everything up to here; what follows on this stream is above it". On a fresh stream it is `last` from `Subscribe`; on a resumed one it is the client's own `afterID`, because the replay starts right after it.
 
 8.3 also made `burrowd`'s broker start at a boot-time ID, so IDs from before a restart are always below the restarted server's. That is what lets this level spot a client from before a restart.
 
@@ -78,8 +83,10 @@ b.mu.Unlock()
    - If `afterID` is not 0 and is below `floor` or above the last published ID, return `ErrCannotResume` without subscribing.
    - Otherwise, under the lock: register the subscriber, snapshot the matching events with ID greater than `afterID`. Then start a goroutine (or do it inline before returning) that sends the snapshot to the channel, then forwards live events, dropping any with ID at or below the last one sent.
    - The subscriber's channel is still the one the caller ranges over; the replay and the live events arrive on it in one ordered sequence.
-3. Keep `Subscribe(prefix)` as `SubscribeFrom(prefix, <current latest ID>)` or as a separate live-only path; either is fine as long as it never replays.
-4. In the handler: parse `Last-Event-ID` with `strconv.ParseUint`. Absent or 0 means a fresh live stream. On `ErrCannotResume`, write `event: reset` with an empty `data:` line, flush, then continue as a live stream from now.
+3. Keep `Subscribe(prefix)`, still returning its `last` ID, as `SubscribeFrom(prefix, <current latest ID>)` or as a separate live-only path; either is fine as long as it never replays.
+4. In the handler: parse `Last-Event-ID` with `strconv.ParseUint`. Absent or 0 means a fresh live stream, opened with `ready` and `id: <last>` as in 8.3.
+   - When `SubscribeFrom` succeeds, send `ready` with `id: <afterID>` and flush, then the replayed and live events.
+   - On `ErrCannotResume`, write `event: reset` with an empty `data:` line, then `Subscribe` and continue as a fresh live stream: `ready` with `id: <last>`, then live events.
 5. Run the race detector. The handover is exactly the kind of bug `-race` finds and a plain run does not.
 
 ## Example
@@ -88,6 +95,10 @@ A client saw events up to ID 41, dropped off, and five keys were written while i
 
 ```bash
 $ curl -N -H 'Last-Event-ID: 41' 'localhost:8080/v1/watch?prefix=user:'
+id: 41
+event: ready
+data: {}
+
 id: 42
 event: put
 data: {"key":"user:7","value":"...","version":1}
@@ -114,6 +125,10 @@ $ curl -N -H 'Last-Event-ID: 3' 'localhost:8080/v1/watch?prefix=user:'
 event: reset
 data:
 
+id: 5000
+event: ready
+data: {}
+
 id: 5001
 event: put
 ...
@@ -124,7 +139,8 @@ The same `reset` arrives when the server restarted since the client's last event
 ## Done when
 
 - [ ] A writer runs continuously while a client reconnects 100 times with its last ID; the IDs it collects are contiguous: no gaps, no duplicates
-- [ ] An `afterID` older than the buffer gives `ErrCannotResume` from the broker and an `event: reset` on the wire, followed by live events
+- [ ] A resumed stream opens with `ready` and `id:` equal to the client's `Last-Event-ID`, before any replayed event
+- [ ] An `afterID` older than the buffer gives `ErrCannotResume` from the broker and an `event: reset` on the wire, followed by `ready` with the broker's last ID and then live events
 - [ ] An `afterID` newer than the newest published ID (a new broker without `WithStartID` standing in for a restarted server) gives `ErrCannotResume` and `reset`
 - [ ] A broker made `WithStartID(1000)` that has published nothing yet gives `ErrCannotResume` for `afterID` 41
 - [ ] The ring buffer is correct after wrapping around: with `history` 8 and 20 events published, `SubscribeFrom(prefix, 12)` replays exactly 13 to 20 and `SubscribeFrom(prefix, 11)` is `ErrCannotResume`
@@ -147,8 +163,10 @@ func NewBroker(buffer, history int, opts ...BrokerOption) *Broker
 func (b *Broker) SubscribeFrom(prefix string, afterID uint64) (
 	<-chan Event, func(), error)
 
-// GET /v1/watch honours Last-Event-ID. ErrCannotResume ->
-// `event: reset` first, then live.
+// GET /v1/watch honours Last-Event-ID. Resumed: ready with
+// id: <afterID>, then replay and live. ErrCannotResume:
+// `event: reset`, then ready with id: <last> and live.
+// Fresh (no Last-Event-ID, or 0): ready with id: <last>, as in 8.3.
 ```
 
 - Ring buffer with a head index, filled by `Publish` under the ID lock
@@ -165,6 +183,7 @@ Pass when: kill the client, write 5 keys, reconnect with Last-Event-ID: the 5 mi
 The suite will cover:
 
 - No gaps/duplicates across 100 reconnects under a concurrent writer (IDs are contiguous)
+- A resumed stream starts with ready and id: <Last-Event-ID>; after a reset the ready carries the broker's last ID
 - ErrCannotResume / reset event for an ID below the floor (overwritten, or below WithStartID on a fresh broker)
 - ErrCannotResume / reset event for an ID above the newest published ID (a new broker standing in for a restarted server)
 - Ring buffer wraparound correctness, including the floor

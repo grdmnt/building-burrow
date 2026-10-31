@@ -8,7 +8,7 @@ Give `burrow.Client` a `Watch` method. The caller writes `for ev, err := range c
 
 ## What you're using from before
 
-**Resumable stream (8.4 · Resume).** `GET /v1/watch?prefix=` with a `Last-Event-ID` header replays what the client missed, then goes live, and answers `event: reset` when it can't resume from that ID: the ID is too old, or the server restarted since. The client sends the header on every reconnect and treats `reset` as an error the caller must handle:
+**Resumable stream (8.4 · Resume).** `GET /v1/watch?prefix=` with a `Last-Event-ID` header replays what the client missed, then goes live, and answers `event: reset` when it can't resume from that ID: the ID is too old, or the server restarted since. Every stream (after the `reset`, if there is one) opens with `event: ready`, whose `id:` is the point the stream starts after. The client sends the header on every reconnect and treats `reset` as an error the caller must handle:
 
 ```text
 GET /v1/watch?prefix=user:
@@ -57,6 +57,8 @@ data: {...}      -> data = {...}
 : heartbeat      -> comment, ignore
 ```
 
+**The `ready` event is for the client, not the caller.** The first event on every stream is `ready` with `data: {}`. `Watch` sets `lastID` to its ID and yields nothing. That closes a gap: a caller that starts from 0 and loses the connection before the first real event would otherwise reconnect with `Last-Event-ID: 0`, get a fresh live stream, and silently miss whatever was written in between. With the `ready` ID it resumes from the point it actually subscribed.
+
 Strip the field name and the single optional space after the colon. A `data` field holds the JSON `KV` from 7.2, which `json.Unmarshal` turns back into a `store.Entry` for the `watch.Event`.
 
 **Cleanup inside an iterator.** The three ways the loop can end, and what each must do:
@@ -74,7 +76,7 @@ A `reset` event means the server could not replay: yield `watch.ErrReset` once a
 3. Write `Watch(ctx, prefix, afterID) iter.Seq2[watch.Event, error]`. Inside the returned function:
    - Keep `lastID := afterID` and `attempt := 0`.
    - Loop: build the request with `ctx`, the prefix and `Last-Event-ID: lastID` (send it even for 0). `Do` it. A non-200 status is an error: yield it once and return.
-   - Read events. For each: if `event` is `reset`, yield `(watch.Event{}, watch.ErrReset)` and return. Otherwise decode `data`, set `lastID`, reset `attempt`, and `if !yield(ev, nil) { return }`.
+   - Read events. For each: if `event` is `reset`, yield `(watch.Event{}, watch.ErrReset)` and return. If it is `ready`, set `lastID` to its ID, reset `attempt`, and yield nothing. Otherwise decode `data`, set `lastID`, reset `attempt`, and `if !yield(ev, nil) { return }`.
    - On a read error: close the body. If `ctx.Err() != nil`, yield it once and return. Otherwise `attempt++`, sleep `Backoff(attempt)` with a `select` on `ctx.Done()`, and reconnect.
 4. Close the response body on every path out of the function, including the one where `yield` returns false. One `defer` per connection, in a helper that handles a single connection, is the clean way.
 5. Run the tests with `-race` and `testkit.NoLeaks`: after `break`, the goroutine count must return to what it was.
@@ -112,12 +114,13 @@ Drop the connection while this loop runs (a proxy restart, a flaky network, or `
 10 delete user:3
 ```
 
-Restart the server instead and the reconnect gets `event: reset`: the loop prints `too far behind, re-list and start over` and stops.
+The `ready` events that opened each connection (with IDs 6, then 8, here) never reach the loop. Restart the server instead and the reconnect gets `event: reset`: the loop prints `too far behind, re-list and start over` and stops.
 
 ## Done when
 
 - [ ] Events arrive in order across a server that closes all client connections mid-stream (`httptest.Server.CloseClientConnections`), with the client reconnecting on its own
 - [ ] After a server restart, the reconnect gets `reset` and the loop yields `watch.ErrReset` once and stops
+- [ ] `ready` is never yielded; a connection dropped before the first real event reconnects with `Last-Event-ID` set to the `ready` ID, and writes made during the gap still arrive
 - [ ] `break` stops the iterator, the response body is closed and `testkit.NoLeaks` sees no goroutine left
 - [ ] Cancelling `ctx` ends the loop with one `context.Canceled` error
 - [ ] A `reset` event from the server is yielded as `watch.ErrReset`
@@ -130,7 +133,8 @@ Restart the server instead and the reconnect gets `event: reset`: the loop print
 package burrow
 
 // Watch streams events for prefix, starting after afterID. It
-// reconnects with backoff on connection loss using the last seen ID. It
+// reconnects with backoff on connection loss using the last seen ID,
+// where a `ready` event's ID counts as seen but is never yielded. It
 // yields a non-nil error once and stops only for ctx errors or a reset
 // the caller must handle.
 func (c *Client) Watch(ctx context.Context, prefix string,
@@ -142,6 +146,7 @@ var ErrReset = errors.New("watch: reset")
 ```
 
 - An SSE parser on `bufio.Reader`: accumulate `id`, `event`, `data` until a blank line, then emit
+- `ready` sets `lastID` and is not yielded
 - `Watch` as a range-over-func iterator that owns its response: `defer resp.Body.Close()` inside it, and return when `yield` returns false
 - Reconnect with `Last-Event-ID` set to the last ID seen, using `Options.Backoff`
 
@@ -158,6 +163,7 @@ The suite will cover:
 - break stops the iterator and the response body is closed (testkit.NoLeaks)
 - ctx cancel ends the loop with context.Canceled
 - A reset event is surfaced as watch.ErrReset
+- ready is never yielded; Watch(ctx, prefix, 0) whose connection is dropped before any real event reconnects with the ready ID as Last-Event-ID and still sees the writes made while it was away
 
 ## Try it
 

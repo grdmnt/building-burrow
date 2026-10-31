@@ -35,6 +35,16 @@ _, err := c.Touch(ctx, key, ttl) // store.ErrNotFound: the lease is gone
 
 The rule from 1.3 and 1.4 that matters most here: a key that was deleted or expired starts again at Version 1 when it is created again.
 
+**ValidateKey (0.2 · Test Bench).** `store.ValidateKey` allows at most 250 bytes. The lock also writes `<key>.fence`, six bytes longer, so a key that is valid on its own can still make the fence key invalid, and that would only show up after the lock was taken. Check the longer one first, before any call to the server:
+
+```go
+if err := store.ValidateKey(key + ".fence"); err != nil {
+	return nil, false, err // wraps store.ErrInvalidKey
+}
+```
+
+So lock keys are at most 244 bytes.
+
 ## What's new here
 
 **Composing primitives.** Nothing in this level is a new store operation. A lock is a *recipe* over calls you already have: create-if-absent-with-TTL to acquire, Set on a counter key for the token, Get to check, Touch to keep, CompareAndDelete to release. The work is in getting the recipe right under failure: what happens when the holder stops, when a Touch fails, when two releasers race.
@@ -109,12 +119,13 @@ Your keepalive ticker runs on real time, so leave yourself an unexported way to 
 
 1. Create `lock/lock.go`, `package lock`, with the `Lock` type and `ErrLost`.
 2. Write `TryAcquire`:
+   - Validate `key + ".fence"` with `store.ValidateKey` and return its error as-is before touching the server. Keys over 244 bytes fail here.
    - Make a random owner ID (16 bytes from `crypto/rand`, hex-encoded).
    - Create the lock: `CompareAndSwapWithTTL(ctx, key, 0, owner, ttl)`. `store.ErrVersionMismatch` means someone else holds it: return `(nil, false, nil)`. Any other error comes back as-is.
    - Take the token: `Set(ctx, key+".fence", owner)`; the returned `Version` is the token. If the Set fails, release the lock key and return the error.
    - Verify: `Get(ctx, key)` must return your owner ID. If the key is gone or holds another ID, return `(nil, false, ErrLost)`.
    - Remember the key, the client, the `ttl`, the owner ID, the lock version from the create and the token. Start the keepalive goroutine and return `(l, true, nil)`.
-3. Write `Acquire` as a loop over `TryAcquire`: on "held by someone else" or `ErrLost`, sleep with a small backoff and try again; stop and return `ctx.Err()` as soon as `ctx` is done.
+3. Write `Acquire` as a loop over `TryAcquire`, returning a validation error at once rather than retrying it: on "held by someone else" or `ErrLost`, sleep with a small backoff and try again; stop and return `ctx.Err()` as soon as `ctx` is done.
    - Sleep with `select` over `time.After` and `ctx.Done()`, not `time.Sleep`, so cancel returns promptly.
 4. Write the keepalive goroutine: every `ttl/3`, `Touch` the lock key, then `Get` it. A different owner ID (or `ErrNotFound`) closes `Done` at once. Otherwise note the time of each success; after two consecutive failures with more than `ttl/2` since the last success, close `Done` and exit. Exit on `Release` too.
 5. `Token()` returns the fence version. `Done()` returns the channel the keepalive closes.
@@ -169,6 +180,7 @@ for {
 - [ ] `Release` by a holder whose lease was lost returns `ErrLost` and does not delete the current holder's lock
 - [ ] `<key>.fence` is still there, with no expiry, after every holder has released or expired
 - [ ] `Acquire` returns `ctx.Err()` promptly when the context is cancelled while waiting
+- [ ] A 245-byte key is rejected by `Acquire` and `TryAcquire` with an error wrapping `store.ErrInvalidKey`, before any request reaches the server; a 244-byte key works
 
 ## Reference
 
@@ -203,6 +215,7 @@ func (l *Lock) Done() <-chan struct{}
 func (l *Lock) Release(ctx context.Context) error
 ```
 
+- Acquire and TryAcquire first check `store.ValidateKey(key + ".fence")` and return its error, so keys over 244 bytes are rejected before any request.
 - The lock key `<key>` holds a random owner ID (`crypto/rand`, hex). Acquire and TryAcquire create it with `CompareAndSwapWithTTL` and `ifVersion` 0. The JSON API's `PutRequest` carries both `if_version` and `ttl`, so this is one HTTP call.
 - The token is the `Version` returned by `Set(ctx, key+".fence", owner)`, taken right after the create. `<key>.fence` is never deleted and never has a TTL.
 - After taking the token, `Get(key)` must return this holder's owner ID; otherwise `ErrLost` and the token is not used.
@@ -224,6 +237,7 @@ The suite will cover:
 - Release by a stale holder is ErrLost and doesn't delete the new holder's lock
 - `<key>.fence` is never deleted and never has an expiry: after all of the above, Get on it succeeds with a zero ExpiresAt
 - Acquire respects ctx (cancel while waiting returns promptly)
+- A 245-byte key: Acquire and TryAcquire return an error wrapping store.ErrInvalidKey and the server sees no request; a 244-byte key acquires, takes a token and releases
 
 ## Try it
 

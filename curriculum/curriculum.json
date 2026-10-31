@@ -1302,6 +1302,7 @@
           "idea": "A lock built from CAS + TTL + Touch, and why the fencing token can't be the lock key's own version",
           "difficulty": 3,
           "build": [
+            "Validate `key+\".fence\"` with store.ValidateKey up front (keys over 244 bytes rejected)",
             "Acquire/TryAcquire: create `<key>` holding a random owner ID via CAS if_version 0 + ttl",
             "Token from `Set(key+\".fence\", owner)`, then Get to verify the owner ID (ErrLost if not)",
             "A keepalive goroutine touching at ttl/3, checking the owner ID and closing Done on loss",
@@ -1331,7 +1332,8 @@
           "consumes": [
             "HTTP client lib",
             "CAS",
-            "Expiry"
+            "Expiry",
+            "ValidateKey"
           ],
           "wild": "etcd's concurrency.Mutex and Lease API; Redis Redlock (and the argument against it); Consul sessions"
         },
@@ -1343,6 +1345,7 @@
           "difficulty": 3,
           "build": [
             "`Broker` with buffered subscriber channels and select/default",
+            "`Subscribe(prefix)` returning the channel, the last published ID and a stop function",
             "`Publish(ev) error`: assigns last+1 when ev.ID is 0, keeps a larger caller ID, refuses a stale one with ErrStaleID",
             "`WithStartID(id)` option to NewBroker",
             "`Wrap` decorating a Store",
@@ -1381,17 +1384,17 @@
           "difficulty": 2,
           "build": [
             "The SSE handler with http.NewResponseController Flush",
+            "An opening `event: ready` with `id:` = the last ID from Subscribe and `data: {}`",
             "Heartbeats",
             "Unsubscribe on r.Context().Done()",
             "The watch route outside 7.4's Timeout, and a `watchers` expvar on the 7.6 admin port",
             "burrowd's broker made with WithStartID from the boot time"
           ],
-          "win": "curl -N prints an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.",
+          "win": "curl -N prints a ready event at once and an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.",
           "go": [
             "server-sent events",
             "flushing through wrappers (Unwrap, NewResponseController, comma-ok Flusher)",
-            "per-event write deadlines",
-            "request context cancellation"
+            "per-event write deadlines"
           ],
           "pkgs": [
             "net/http",
@@ -1424,6 +1427,7 @@
             "Ring buffer with head index and a floor",
             "SubscribeFrom: subscribe, replay, skip duplicates",
             "ErrCannotResume for an ID below the floor or above the newest published ID",
+            "`ready` first on every stream: id = afterID when resuming, the broker's last ID after a reset",
             "Last-Event-ID in the handler"
           ],
           "win": "Kill the client, write 5 keys, reconnect with Last-Event-ID: the 5 missed events arrive first, then live ones, with no gaps or duplicates; an ID older than the buffer, or newer than anything the server has published, yields a reset event.",
@@ -1456,6 +1460,7 @@
           "difficulty": 3,
           "build": [
             "An SSE parser on bufio.Reader",
+            "`ready` sets lastID and is never yielded",
             "Watch as a range-over-func iterator",
             "Reconnect with Last-Event-ID"
           ],
@@ -1816,7 +1821,7 @@
             "Persist currentTerm/votedFor/entries via WAL before replying",
             "Truncate on AppendEntries conflict",
             "Snapshot and log trim bounded by followers",
-            "Restart recovery"
+            "Restart recovery, with the broker built WithStartID(snapshot index)"
           ],
           "win": "Restart all three nodes at once: no acknowledged write is lost and terms never go backwards; a write storm with group commit sustains at least 2,000 writes/s on loopback.",
           "go": [
@@ -1836,7 +1841,8 @@
             "Raft KV",
             "CRC guard",
             "Group commit",
-            "Snapshotter"
+            "Snapshotter",
+            "Resumable stream"
           ],
           "wild": "etcd's wal + snap packages; hashicorp/raft-boltdb"
         }
@@ -2388,7 +2394,7 @@
             "`PeerServerConfig`, `PeerClientConfig`, `AllowNames`: `ClientAuth: tls.RequireAndVerifyClientCert`, `ClientCAs`, and `VerifyConnection` (or `VerifyPeerCertificate`) for the allow check",
             "`rpc.Server.TLS` and `rpc.DialTLS`; the 9.2 code path untouched when `TLS` is nil",
             "`-peer-*` flags in `burrowd serve`, threaded into Raft's transport",
-            "`devcluster -secure`"
+            "`devcluster -secure` (with `-data <dir>` to keep the CA, certificates and tokens)"
           ],
           "win": "Three nodes elect a leader and replicate over mutual TLS, a client with a certificate from another CA or with a CN that is not a peer is refused during the handshake, plaintext dials fail fast, and `devcluster -secure` brings the whole thing up with burrowctl talking to it over https with a token.",
           "go": [
@@ -2409,7 +2415,7 @@
           "hints": [
             "Server side: &tls.Config{Certificates: {cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: ca.Pool(), MinVersion: tls.VersionTLS13, VerifyConnection: func(cs tls.ConnectionState) error { return allow(cs.PeerCertificates[0]) }}. The chain is already verified when VerifyConnection runs.",
             "Client side: &tls.Config{Certificates: {cert}, RootCAs: ca.Pool(), ServerName: peerID}. rpc.Server only needs `if s.TLS != nil { ln = tls.NewListener(ln, s.TLS) }` before the accept loop; DialTLS is (&tls.Dialer{Config: cfg}).DialContext.",
-            "devcluster -secure: pki.NewCA, one Issue per node with hosts {id, \"localhost\", \"127.0.0.1\"} and both ExtKeyUsages, WriteFiles into the work dir, and the flags appended to each node's argv. Print `ca` and `token` before `cluster ready` so the tests can parse them."
+            "devcluster -secure: pki.NewCA, one Issue per node with hosts {id, \"localhost\", \"127.0.0.1\"} and both ExtKeyUsages, WriteFiles into the data dir (kept with -data <dir>, as in 9.1), and the flags appended to each node's argv. Print `ca` and `token` before `cluster ready` so the tests can parse them."
           ],
           "unlock": "Secure cluster",
           "consumes": [

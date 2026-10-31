@@ -10,9 +10,13 @@ Then ship it: a release build with the version stamped in by the linker, built f
 
 ## What you're using from before
 
-**Chaos proxy (11.1 · Fault Injector).** The scenario starts `chaos` with its seed and talks to the admin API with `burrow.Client`'s `http.Client` or plain `net/http`:
+**Chaos proxy (11.1 · Fault Injector).** The scenario starts `chaos` with its seed and talks to the admin API with a plain `http.Client` that has a short `Timeout`, so a wedged proxy fails the run instead of hanging it. `post` is a three-line helper around it:
 
 ```go
+hc := &http.Client{Timeout: 2 * time.Second}
+post := func(url, body string) (*http.Response, error) {
+	return hc.Post(url, "application/json", strings.NewReader(body))
+}
 post(adminURL+"/partition", `{"nodes":["n3"]}`)
 time.Sleep(5 * time.Second)
 post(adminURL+"/heal", ``)

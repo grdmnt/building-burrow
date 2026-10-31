@@ -75,6 +75,7 @@ type ClusterStatus struct {
 4. In `burrow.Client`, set `CheckRedirect` to allow at most 3 hops, build bodies with `bytes.NewReader`, cache the leader from `X-Burrow-Leader` on every response, and send writes to the cached leader when there is one.
 5. Treat 503 `leader_unknown` as retryable with backoff; keep 412 and other errors as they were.
 6. In `burrowd serve`, when `-peers` is set, build the `raft.Node`, `raft.KV`, and the RPC server for Raft, and serve the API from the KV instead of the plain store.
+   - Build the cluster's broker with plain `watch.NewBroker(buffer, history)`, without the boot-time `WithStartID` from 8.3. Its IDs are log indexes (10.3); a boot-time start ID would sit above every index, and `Publish` would refuse them all with `ErrStaleID`.
 7. Test failover with devcluster: write through a follower, kill the leader's process, write again.
 
 ## Example
@@ -122,6 +123,7 @@ What this level builds:
 - Redirect on followers
 - Client leader cache and retry
 - burrowd serve uses raft.KV when -peers is set
+- With -peers, the broker is built without WithStartID: event IDs are log indexes
 
 Decisions the tests rely on:
 
@@ -129,6 +131,7 @@ Decisions the tests rely on:
 - A redirect keeps the method, path, query and body (307, never 302).
 - `503 leader_unknown` is retryable for every operation; `412 version_mismatch` is never retried.
 - `X-Burrow-Leader` is set on every successful write and every redirect.
+- In cluster mode the broker has no `WithStartID`; a watch on any node sees event IDs equal to log indexes.
 
 ## The tests check
 
@@ -140,6 +143,7 @@ The suite will cover:
 - Client writes through a follower URL
 - Leader failover with devcluster: write succeeds within 3 s
 - Status JSON decodes into a typed struct
+- A watch on a burrowd started with -peers gets event IDs equal to the log indexes of the writes
 
 ## Try it
 

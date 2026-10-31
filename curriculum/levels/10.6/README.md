@@ -52,6 +52,12 @@ entries := mem.Snapshot() // the *store.Memory under raft.KV (4.4)
 // to snapshot.tmp; fsync; rename to snapshot.db; fsync the dir
 ```
 
+**Resumable stream (8.4 · Resume).** The broker's ring has a floor: `SubscribeFrom` with an `afterID` below it is `ErrCannotResume`, and the handler sends `reset`. `WithStartID` sets where the floor starts, which is how a restarted node says "I have nothing before this index":
+
+```go
+b := watch.NewBroker(64, 1024, watch.WithStartID(snap.Index))
+```
+
 ## What's new here
 
 **Durability ordering.** The rule is "persist, then reply". Why it is not negotiable:
@@ -81,6 +87,8 @@ for rec, err := range l.Records() { // l is the *wal.Log
 
 **Restart recovery.** `Open` the snapshot first (refuse on a bad checksum), `Restore` its entries into the store, set `applied` to its index. Then open the WAL and replay: state records set the term and vote, entry records rebuild the in-memory log from the snapshot's index onward. `commitIndex` starts at the snapshot's index and climbs again as the leader's heartbeats say so; entries after it are re-applied as they re-commit, which is safe because the apply loop only applies past `applied`.
 
+The watch broker is rebuilt too, and it must not pretend to have events the snapshot swallowed. Build it with `watch.WithStartID(snapshotIndex)` (0 when there is no snapshot): its floor is then the snapshot's index, so a watcher resuming from an index the snapshot covers gets a `reset` instead of a replay that silently skips to the first entry after the snapshot.
+
 **Reuse across layers.** Nothing in `wal` knows about Raft and nothing in `raft` knows about files beyond the two names. Each layer was built and tested on its own, and the durability guarantee of this level is the sum of guarantees you already proved.
 
 ## What to do
@@ -90,7 +98,7 @@ for rec, err := range l.Records() { // l is the *wal.Log
 3. Append a state record on every term change and every vote, before the reply or request that depends on it. Append entry records before every success reply to `AppendEntries`, and let `Propose`'s caller append the leader's own entry.
 4. Keep the log-index-to-record-number index and use `wal.Log.Truncate` on conflict, followed by a fresh state record.
 5. Snapshot when the log passes a threshold: `Memory.Snapshot()` with the applied index and term in front, written with the 4.4 tmp/rename sequence; then rewrite the log keeping entries from `min(matchIndex)` onward.
-6. Implement recovery: snapshot, then replay; start with the persisted term.
+6. Implement recovery: snapshot, then replay; start with the persisted term. Build the broker with `WithStartID(snapshotIndex)`.
 7. Measure a write storm with group commit: 100 clients writing through `burrow.Client` on loopback should sustain at least 2,000 writes per second.
 8. Try a full restart by hand with `devcluster -data ./data`, as in the example. Without `-data` each run gets fresh temp directories and there is nothing to recover.
 
@@ -120,6 +128,7 @@ The term after the restart is higher than before (a new election ran), never low
 - [ ] A conflict resolved with `wal.Log.Truncate` leaves the follower's log identical to the leader's
 - [ ] Compaction never drops entries a live follower has not received (`min(matchIndex)`)
 - [ ] Terms never go backwards across a restart
+- [ ] After a restart from a snapshot at index S, a watcher resuming from an index below S gets `reset`, and one resuming from S gets the entries after S as they are re-applied
 - [ ] A write storm sustains at least 2,000 writes per second on loopback
 
 ## Reference
@@ -140,7 +149,7 @@ What this level builds:
 - Persist currentTerm/votedFor/entries via WAL before replying
 - Truncate on AppendEntries conflict
 - Snapshot and log trim bounded by followers
-- Restart recovery
+- Restart recovery, with the broker built `WithStartID(snapshot index)`
 
 Decisions the tests rely on:
 
@@ -148,6 +157,7 @@ Decisions the tests rely on:
 - After a restart the node's term is the last persisted term, never lower.
 - A snapshot never includes entries past `applied`, and compaction never removes entries at or after `min(matchIndex)` over live followers.
 - `snapshot.tmp` is never trusted; a snapshot with a bad checksum stops startup.
+- After restoring a snapshot at index S, the broker is built with `WithStartID(S)`, so `SubscribeFrom` with an `afterID` below S is `ErrCannotResume`.
 
 ## The tests check
 
@@ -159,6 +169,7 @@ The suite will cover:
 - Vote persisted: a node restarted mid-election doesn't vote twice
 - Conflict truncation via WAL leaves the log identical to the leader's
 - Compaction never trims past a live follower's matchIndex
+- After a restart from a snapshot at index S, resuming a watch from below S is a reset, never a partial replay
 
 ## Try it
 

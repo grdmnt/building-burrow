@@ -8,10 +8,11 @@ Add `GET /v1/watch?prefix=` to the HTTP API. A client opens it once and the resp
 
 ## What you're using from before
 
-**Broker (8.2 · Fan-out).** `Subscribe(prefix)` gives a channel of events and a stop function. The handler subscribes once per request, ranges over the channel, and calls stop on the way out. A closed channel means the broker dropped this subscriber for being slow, and the handler ends the stream:
+**Broker (8.2 · Fan-out).** `Subscribe(prefix)` gives a channel of events, `last` (the last ID published before it subscribed; everything on the channel is above it) and a stop function. The handler subscribes once per request, ranges over the channel, and calls stop on the way out. A closed channel means the broker dropped this subscriber for being slow, and the handler ends the stream:
 
 ```go
-ch, stop := s.Broker.Subscribe(r.URL.Query().Get("prefix"))
+prefix := r.URL.Query().Get("prefix")
+ch, last, stop := s.Broker.Subscribe(prefix)
 defer stop()
 ```
 
@@ -63,6 +64,15 @@ data: {"key":"user:1","value":"","version":0}
 
 Set `Cache-Control: no-cache` too, and call `w.WriteHeader(200)` before the first event so the headers go out even if no event arrives for a while.
 
+**A `ready` event first.** Every stream starts with one event before any change: `event: ready`, `data: {}`, and `id:` set to `last` from `Subscribe`. It tells the client "you are subscribed, and you have seen everything up to this ID". A client that drops off before the first real event still has an ID to resume from, so nothing published in between is lost:
+
+```text
+id: 1836479692800000
+event: ready
+data: {}
+
+```
+
 **Flushing through wrappers.** `net/http` buffers what a handler writes and sends it when the handler returns. A stream needs each event pushed out now. The modern way is `http.NewResponseController(w).Flush()`. The controller looks for a `Flush` method on `w`; when `w` is a wrapper with `Unwrap() http.ResponseWriter`, it follows that chain down to the real connection. That is why 7.3's `statusRecorder` has `Unwrap`.
 
 ```go
@@ -110,7 +120,7 @@ Shifting by 10 leaves room for 1,024 events per millisecond the previous process
 1. Give `api.Server` a `Broker *watch.Broker` field and register `GET /v1/watch` outside the `Timeout` part of the chain, as shown above.
 2. In `burrowd serve`, make the broker with `WithStartID` from the boot time as above, wrap the store with `watch.Wrap`, and give both to `api.Server`.
 3. In the handler: read `prefix`, subscribe, `defer stop()`.
-4. Write the three headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, status 200) and flush once, so the client sees the stream has opened.
+4. Write the three headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, status 200), then the `ready` event with `id: <last>` and `data: {}`, and flush, so the client sees the stream has opened and where it starts.
    - If `Flush` returns an error, log it with the request's logger and return. The stream cannot work through a writer that can't flush.
 5. Loop with a `select` over the event channel, a heartbeat ticker and `r.Context().Done()`.
    - For an event: set a write deadline, write `id:`, `event:`, `data:` and a blank line, flush. Any write or flush error ends the handler.
@@ -125,6 +135,10 @@ Terminal one (IDs start just above the boot-time start ID):
 
 ```bash
 $ curl -N 'localhost:8080/v1/watch?prefix=user:'
+id: 1836479692800000
+event: ready
+data: {}
+
 id: 1836479692800001
 event: put
 data: {"key":"user:1","value":"YW5u","version":1}
@@ -151,7 +165,8 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 
 ## Done when
 
-- [ ] A client with `prefix=user:` receives `put`, `delete` and `expire` events for `user:` keys only, each with `id`, `event` and a JSON `data` line
+- [ ] Every stream starts with `event: ready`, `data: {}` and `id:` equal to the broker's last published ID at subscribe time, before any other event
+- [ ] A client with `prefix=user:` receives `put`, `delete` and `expire` events for `user:` keys only, each with `id`, `event` and a JSON `data` line, all with IDs above the `ready` ID
 - [ ] Closing the client connection removes the subscriber: `watchers` is back to 0
 - [ ] With the heartbeat interval shortened, a `: heartbeat` comment arrives during silence
 - [ ] Through the full 7.3 chain, each event reaches the client on its own, not only when the handler returns
@@ -164,6 +179,8 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 ```go
 // GET /v1/watch?prefix=user:
 //   200 text/event-stream; Cache-Control: no-cache
+//   first:       id: <last>\nevent: ready\ndata: {}\n\n, where last
+//                is from Subscribe (the last ID before subscribing)
 //   each event:  id: <n>\nevent: put|delete|expire\ndata: <KV JSON>\n\n
 //   a `: heartbeat` comment every 15s of silence
 // Subscriber count visible in expvar `watchers`.
@@ -174,6 +191,7 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 - The handler flushes after every event with `http.NewResponseController(w).Flush()`, which reaches the connection through 7.3's `statusRecorder` because that wrapper has `Unwrap()`.
 - A Flush error (or `ok == false` from a comma-ok `w.(http.Flusher)` on a writer that can't flush) means the stream can't work: unsubscribe, log, return.
 - Unsubscribe when `r.Context()` is done.
+- The first event of every stream is `ready` with `data: {}` and the `last` ID from `Subscribe`; every later event has a larger ID.
 - 7.4's write timeout must not apply to this handler: extend the deadline per event with `SetWriteDeadline` through the same controller. 7.4's `Timeout` middleware does not wrap this route.
 - `burrowd` builds its broker with `WithStartID` from the boot time, so a restarted server's IDs are above every ID from before.
 
@@ -181,10 +199,11 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 
 > **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/8.3/files/`, matching the earlier chapters.
 
-Pass when: `curl -N` prints an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.
+Pass when: `curl -N` prints a `ready` event at once and an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.
 
 The suite will cover:
 
+- The first event is `ready` with `data: {}` and the last published ID at subscribe time (also with writers running concurrently: no later event has an ID at or below it)
 - An httptest client receives put, delete and expire events for its prefix only
 - Disconnect drops the subscriber (expvar watchers back to 0)
 - Heartbeat line appears with a shortened interval option
@@ -207,6 +226,6 @@ SSE as used by OpenAI/Anthropic streaming APIs and Kubernetes watch (chunked JSO
 
 ## New in Go
 
-server-sent events · flushing through wrappers (Unwrap, NewResponseController, comma-ok Flusher) · per-event write deadlines · request context cancellation
+server-sent events · flushing through wrappers (Unwrap, NewResponseController, comma-ok Flusher) · per-event write deadlines
 
 Standard library: `net/http`, `fmt`, `time`, `encoding/json`

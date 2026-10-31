@@ -48,11 +48,12 @@ default:
 
 A dropped subscriber has its channel closed and is removed. Closing tells the reader "you fell behind" the moment it next reads, which is the only honest thing to do. Only the broker closes subscriber channels, because closing a channel twice panics and so does sending on a closed one.
 
-**Returning an unsubscribe function.** `Subscribe` returns the channel and a `func()`. The caller `defer`s it. There is no handle type to learn and no ID to pass back. Make it safe to call twice with `sync.Once` from 1.5, so a subscriber that was dropped by the broker and then unsubscribes itself does no harm:
+**Returning an unsubscribe function.** `Subscribe` returns the channel, `last` (the ID of the last event published before the subscription began) and a `func()`. The caller `defer`s it. There is no handle type to learn and no ID to pass back. Make it safe to call twice with `sync.Once` from 1.5, so a subscriber that was dropped by the broker and then unsubscribes itself does no harm. Read `last` under the same lock that adds the subscriber; then every event on the channel has an ID above it, which 8.3 uses to tell a client where its stream starts:
 
 ```go
-ch, stop := b.Subscribe("user:")
+ch, last, stop := b.Subscribe("user:")
 defer stop()
+fmt.Println("from after", last)
 for ev := range ch { // ends when the broker closes ch
 	fmt.Println(ev.ID, ev.Type, ev.Entry.Key)
 }
@@ -94,7 +95,7 @@ b.Publish(watch.Event{Type: "put"})           // ID 2001
 
 1. Create `watch/broker.go`, `package watch`, with `Event`, `Broker`, `NewBroker`, `BrokerOption`, `WithStartID` and `ErrStaleID`.
 2. Keep a mutex, `last` (the ID of the last published event, 0 or the `WithStartID` value to begin with), and the set of subscribers. Each subscriber holds its prefix, its channel and a `sync.Once` for unsubscribing.
-3. Write `Subscribe(prefix)`: make a channel with `buffer` room, add the subscriber under the lock, return the channel and a stop function that removes it and closes the channel, once.
+3. Write `Subscribe(prefix)`: make a channel with `buffer` room, add the subscriber and read `last` under the lock, return the channel, `last` and a stop function that removes it and closes the channel, once.
 4. Write `Publish(ev)`: under the lock, settle the ID. If `ev.ID` is 0, set it to `last+1`. If it is set and not above `last`, return `ErrStaleID` and deliver nothing. Set `last = ev.ID`. Then for each subscriber whose prefix matches `ev.Entry.Key` (`strings.HasPrefix`), try a non-blocking send. On a full buffer, drop that subscriber: remove it and close its channel.
    - Settling the ID and sending under the same lock is what keeps IDs increasing in every channel.
 5. Create `watch/store.go` with `Store` embedding `store.Store`, and `Wrap`.
@@ -106,7 +107,7 @@ b.Publish(watch.Event{Type: "put"})           // ID 2001
 
 ```go
 b := watch.NewBroker(16)
-ch, stop := b.Subscribe("user:")
+ch, _, stop := b.Subscribe("user:")
 defer stop()
 
 st := watch.Wrap(store.NewMemory(), b)
@@ -127,7 +128,7 @@ The IDs skip 2 because the `cfg:x` write took it. IDs are global to the broker, 
 A subscriber that never reads is dropped after `buffer` events, and 1,000 writes take no longer than with no subscribers at all:
 
 ```go
-dead, _ := b.Subscribe("")       // never read
+dead, _, _ := b.Subscribe("")    // never read
 for i := range 1000 {
 	st.Set(ctx, fmt.Sprint("k", i), nil)  // never blocks
 }
@@ -140,6 +141,7 @@ fmt.Println(ok)                  // false: the broker closed it
 - [ ] Three fast subscribers each see every matching event, in order, with increasing IDs
 - [ ] `Publish` with ID 0 assigns one more than the last ID; a caller's ID above the last is kept; a caller's ID at or below the last returns `ErrStaleID` and reaches nobody
 - [ ] With `WithStartID(1000)` the first assigned ID is 1001
+- [ ] `Subscribe` returns the last published ID, and every event on its channel has a larger one, even with writers publishing concurrently
 - [ ] A subscriber that never reads is dropped (its channel is closed) and 1,000 writes are not measurably slower than with no subscriber
 - [ ] A key with a TTL on a fake clock produces an `expire` event carrying the entry after the clock passes its expiry
 - [ ] Calling the stop function twice is fine; publishing after every subscriber has left is fine
@@ -172,10 +174,12 @@ func WithStartID(id uint64) BrokerOption
 // event is dropped.
 func (b *Broker) Publish(ev Event) error
 
-// Subscribe returns a channel of events whose key starts with prefix
-// and a stop function. The channel is closed and the subscriber removed
-// if it falls `buffer` events behind.
-func (b *Broker) Subscribe(prefix string) (<-chan Event, func())
+// Subscribe returns a channel of events whose key starts with prefix,
+// the last ID published before it subscribed (every event on the
+// channel has a larger ID), and a stop function. The channel is closed
+// and the subscriber removed if it falls `buffer` events behind.
+func (b *Broker) Subscribe(prefix string) (ch <-chan Event,
+	last uint64, stop func())
 
 // Wrap decorates any store.Store so every successful mutation
 // publishes. Pass its OnEvict method as store.WithOnEvict so expiries
@@ -199,6 +203,7 @@ Pass when: with one subscriber that never reads, 1,000 writes take no longer tha
 The suite will cover:
 
 - Ordering and completeness for 3 fast subscribers
+- Subscribe's `last` equals the last published ID, and every event delivered on the channel is above it, under concurrent publishers
 - ID rules: 0 is assigned last+1, a caller's larger ID is kept, a caller's ID at or below the last is ErrStaleID and delivered to nobody; WithStartID(1000) gives 1001 first
 - A stuck subscriber is dropped and writers are not delayed (timed)
 - Expiry on a FakeClock produces an expire event with the entry
