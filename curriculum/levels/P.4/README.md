@@ -10,7 +10,7 @@ This level follows the Tour of Go section "Methods and interfaces", including it
 
 ## What you're using from before
 
-**Collections kit (P.3 · More Types).** `CountWords` reads all the bytes out of a reader, turns them into a string and hands them to your `collections.WordCount`, so `primer/shapes` imports `burrow/primer/collections`:
+**Collections kit (P.3 · Collections).** `CountWords` reads all the bytes out of a reader, turns them into a string and hands them to your `collections.WordCount`, so `primer/shapes` imports `burrow/primer/collections`:
 
 ```go
 counts := collections.WordCount(string(data))
@@ -349,7 +349,7 @@ func CountWords(r io.Reader) (map[string]int, error)
 
 ```bash
 ./burrow watch
-go test -v -run TestLP_4_Describe ./primer/shapes   # one subtest per value
+go test -v -run TestLP_4_Describe ./primer/shapes  # a subtest each
 go test -v -run 'TestLP_4_Rot13ReaderContract/one' ./primer/shapes
 ```
 

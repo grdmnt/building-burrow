@@ -12,7 +12,7 @@ You need Go 1.24 or newer, and internet the first time you run `./burrow` (it bu
 git clone <this repo> building-burrow
 cd building-burrow
 ./burrow          # the full-screen browser: levels, their pages, the machine
-./burrow next     # start level 0.1
+./burrow next     # start the first level: P.1 if Go is new to you, or 0.1
 ```
 
 Colours adapt to light and dark terminals automatically. If yours guesses wrong, set `BURROW_THEME=light` (or `dark`) in your shell profile.
@@ -77,6 +77,7 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 
 | | Chapter | Levels | What you build |
 |---|---|---|---|
+| P | Primer | 6 | optional, and the place to start if Go is new: the Tour of Go's sections as levels, from packages and variables to goroutines and a concurrent crawler |
 | 0 | Boot Sector | 2 | the module, a testable `main`, `go vet`, `ValidateKey` and your first graded table-driven tests |
 | 1 | Memory | 5 | the `store.Store` contract and its Memory engine: mutex, versions and CAS, expiry on an injectable clock, a janitor |
 | 2 | Codec | 2 | a length-prefixed record codec and the KV frame on top of it |
@@ -97,4 +98,4 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 | D | Eventually Consistent | 3 | optional epilogue: a hash ring, quorum replication, and the checker catching it |
 | Q | Queues | 4 | optional: a durable queue broker, peek-lock, competing consumers, then the real Azure Service Bus |
 
-47 mandatory levels, 22 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts, Toolchain and gRPC chapters have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).
+47 mandatory levels, 28 optional. Levels 0.1 to 7.2 and the optional Primer, HTTP Deep Cuts, Toolchain and gRPC chapters have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).

@@ -319,9 +319,28 @@ func (c *Curriculum) packages(l *Level) []string {
 func testPrefix(l *Level) string { return "L" + strings.ReplaceAll(l.ID, ".", "_") + "_" }
 
 // install copies the level's files into the repo. It returns what it wrote.
+// install copies a level's provided files into the repo. Every level also
+// gets the shared test helpers (internal/testkit, shipped with 0.1), so a
+// level started before 0.1, such as the Primer's, can use them.
 func (c *Curriculum) install(l *Level) (added, updated []string, err error) {
+	type file struct {
+		rel string
+		lv  *Level
+	}
+	var files []file
 	for _, rel := range c.files(l) {
-		src := filepath.Join(c.levelDir(l), "files", rel)
+		files = append(files, file{rel, l})
+	}
+	if boot := c.byID["0.1"]; boot != nil && boot != l {
+		for _, rel := range c.files(boot) {
+			if strings.HasPrefix(filepath.ToSlash(rel), "internal/testkit/") {
+				files = append(files, file{rel, boot})
+			}
+		}
+	}
+	for _, f := range files {
+		rel := f.rel
+		src := filepath.Join(c.levelDir(f.lv), "files", rel)
 		dst := filepath.Join(c.root, rel)
 		want, err := os.ReadFile(src)
 		if err != nil {

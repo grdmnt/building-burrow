@@ -139,25 +139,43 @@ func TestLP_6_TimeoutFetcherPassesThrough(t *testing.T) {
 	}
 }
 
-// lp6NoLeak fails the test if, 2s after it ends, more goroutines are
-// running than when it started.
+// lp6NoLeak fails the test if, 2s after it ends, a goroutine is still
+// running code from package crawl.
 func lp6NoLeak(t *testing.T, hint string) {
 	t.Helper()
-	before := runtime.NumGoroutine()
 	t.Cleanup(func() {
 		if t.Failed() {
 			return
 		}
 		deadline := time.Now().Add(2 * time.Second)
-		for runtime.NumGoroutine() > before {
+		for {
+			left := lp6CrawlGoroutines()
+			if len(left) == 0 {
+				return
+			}
 			if time.Now().After(deadline) {
-				t.Errorf("goroutine leak: %d goroutines before, %d "+
-					"after. %s", before, runtime.NumGoroutine(), hint)
+				t.Errorf("goroutine leak: %d goroutine(s) from package "+
+					"crawl still running 2s later. %s\n\n%s", len(left),
+					hint, strings.Join(left, "\n\n"))
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
+}
+
+// lp6CrawlGoroutines returns the stacks of goroutines that are running
+// code from package crawl (not this test file).
+func lp6CrawlGoroutines() []string {
+	buf := make([]byte, 1<<20)
+	buf = buf[:runtime.Stack(buf, true)]
+	var found []string
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "burrow/primer/crawl.") {
+			found = append(found, g)
+		}
+	}
+	return found
 }
 
 const lp6LeakHint = "When the timeout wins the select, nobody will " +

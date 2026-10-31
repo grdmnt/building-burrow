@@ -9,6 +9,318 @@
   ],
   "chapters": [
     {
+      "key": "P",
+      "name": "Primer",
+      "optional": true,
+      "needs": [],
+      "line": "Optional, and the place to start if Go is new: the Tour of Go's six sections as levels, from packages and variables to goroutines.",
+      "pos": {
+        "row": 0,
+        "col": 1,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "P.1",
+          "title": "Basics",
+          "brief": "Write a hello program and a first package: exported and unexported names, multiple and named results, var and :=, zero values, conversions and untyped constants.",
+          "build": [
+            "`primer/hello/main.go`: a program that imports `burrow/primer/basics` and prints `hello, burrow`",
+            "`basics.Greet` built from the unexported constant `greeting`",
+            "`SplitBill(cents, people) (each, leftover int)` with named results",
+            "`Average(a, b, c int) float64`, converting before dividing",
+            "untyped constants `KiB` to `TiB`, and a `Next()` counter on a zero-valued package variable"
+          ],
+          "win": "`go run ./primer/hello` prints `hello, burrow`; Greet, SplitBill, Average and Next give exact answers; TiB fits an int64 and a float64 because it is untyped.",
+          "go": [
+            "packages",
+            "package main",
+            "modules and import paths",
+            "exported names",
+            "functions",
+            "multiple results",
+            "named results",
+            "var",
+            ":=",
+            "basic types",
+            "zero values",
+            "type conversions",
+            "type inference",
+            "constants",
+            "untyped constants",
+            "gofmt"
+          ],
+          "pkgs": [
+            "fmt"
+          ],
+          "hints": [
+            "Every file in primer/basics starts with `package basics`. Lowercase names (greeting, calls) stay inside the package; capitalised ones (Greet, KiB) are what primer/hello can call.",
+            "With named results, `each` and `leftover` are already variables: assign them with `/` and `%` and finish with a bare `return`. For Average, `float64(a+b+c) / 3` converts before dividing; `float64((a+b+c) / 3)` is too late.",
+            "Write the sizes as `const ( KiB = 1024; MiB = 1024 * KiB; ... )` with no type name, and `var calls int` with no value. Then `func Next() int { calls++; return calls }`."
+          ],
+          "unlock": "Basics kit",
+          "idea": "A package is a directory, and a capital letter decides who can see a name",
+          "difficulty": 1,
+          "consumes": [],
+          "wild": "Every standard library file looks like this: `go doc -src strings.Fields` shows an exported function calling unexported helpers, and `go doc time.Second` a block of constants built from each other"
+        },
+        {
+          "id": "P.2",
+          "title": "Flow Control",
+          "brief": "Loop to a square root with Newton's method, choose with switch, count down with stacked defers, and print a bill split using P.1's SplitBill.",
+          "build": [
+            "`flow.Sqrt(x) (z, steps)`: Newton's method from 1.0, stopping when a guess moves less than 1e-10",
+            "`FizzBuzz(n)` with a switch that has no condition",
+            "`Countdown(b, n)` writing `3 2 1 liftoff` purely with deferred writes",
+            "`Receipt(cents, people)` built on `basics.SplitBill`, one line per person"
+          ],
+          "win": "Sqrt matches math.Sqrt with the exact step count; FizzBuzz is right; Countdown uses defer in a loop; every Receipt adds up to the bill to the cent.",
+          "go": [
+            "for",
+            "for as while",
+            "infinite for and break",
+            "if",
+            "if with a short statement",
+            "else",
+            "switch",
+            "switch with no condition",
+            "defer",
+            "stacked defers",
+            "math.NaN",
+            "strconv.Itoa",
+            "strings.Builder",
+            "importing your own package"
+          ],
+          "pkgs": [
+            "math",
+            "strconv",
+            "strings"
+          ],
+          "hints": [
+            "Each function is about one statement: Sqrt is a for loop, FizzBuzz a switch, Countdown defers, Receipt a for loop with an if. Start with the guard clauses: negative and zero inputs to Sqrt, fewer than one person to Receipt.",
+            "In Sqrt, compute `next := z - (z*z-x)/(2*z)`, count it, then compare `math.Abs(next-z)` with 1e-10 before moving on with `z = next`. In FizzBuzz, write `switch {` with `case n%15 == 0:` first, because the first true case wins.",
+            "Countdown: `defer b.WriteString(\"liftoff\")`, then `for i := 1; i <= n; i++ { defer b.WriteString(strconv.Itoa(i) + \" \") }`. Receipt: `each, leftover := basics.SplitBill(cents, people)`, then person i pays `each`, plus one when `i <= leftover`."
+          ],
+          "unlock": "Flow kit",
+          "idea": "One loop keyword, switches that don't fall through, and defer's last-in, first-out stack",
+          "difficulty": 2,
+          "consumes": [
+            "Basics kit"
+          ],
+          "wild": "`defer f.Close()` and `defer mu.Unlock()` are in nearly every Go codebase; math/big's Float.Sqrt still refines its answer with Newton's method"
+        },
+        {
+          "id": "P.3",
+          "title": "Collections",
+          "brief": "Move a struct through a pointer, reverse and chunk slices, count words in a map, and return a Fibonacci closure; Dist takes its root with P.2's Sqrt.",
+          "build": [
+            "`Point` with `Move(p *Point, dx, dy)` and `Dist(a, b)` via `flow.Sqrt`",
+            "`Reverse(xs []int)` in place and `Chunk(xs, size) [][]int`",
+            "`WordCount(s) map[string]int`: strings.Fields, lowercased, never nil",
+            "`Fibonacci() func() int`, a closure with its own state"
+          ],
+          "win": "Move changes the caller's point; Reverse works in place even on a sub-slice; Chunk and WordCount give exact results; each Fibonacci generator starts at 0 and keeps its own place.",
+          "go": [
+            "pointers",
+            "pass by value",
+            "structs",
+            "struct literals",
+            "pointers to structs",
+            "arrays",
+            "slices",
+            "slice expressions",
+            "shared backing arrays",
+            "len and cap",
+            "nil slices",
+            "make",
+            "slices of slices",
+            "append",
+            "range",
+            "blank identifier",
+            "maps",
+            "nil maps",
+            "comma ok",
+            "delete",
+            "function values",
+            "closures"
+          ],
+          "pkgs": [
+            "strings"
+          ],
+          "hints": [
+            "Only Move needs a pointer: a slice already shares its array with the caller, and a map you make and return is shared too. Dist ignores Sqrt's step count with `_`.",
+            "Reverse: `for i, j := 0, len(xs)-1; i < j; i, j = i+1, j-1 { xs[i], xs[j] = xs[j], xs[i] }`. Chunk: step `i` by `size` and append `xs[i:min(i+size, len(xs))]` to a `var out [][]int`.",
+            "WordCount: `counts := make(map[string]int)`, then `counts[strings.ToLower(w)]++` for each `w` in `strings.Fields(s)`. Fibonacci: declare `a, b := 0, 1` inside Fibonacci, and have the returned func save `a`, advance with `a, b = b, a+b`, and return the saved value."
+          ],
+          "unlock": "Collections kit",
+          "idea": "Go copies values; pointers, slices and maps are how you share them",
+          "difficulty": 2,
+          "consumes": [
+            "Flow kit"
+          ],
+          "wild": "`go doc -src strings.Fields` fills a pre-sized make([]string, n); slices.Reverse, slices.Chunk and maps.Keys are the generic standard-library versions of what you wrote"
+        },
+        {
+          "id": "P.4",
+          "title": "Methods and Interfaces",
+          "brief": "Give shapes methods, satisfy interfaces without declaring it, and meet the interfaces all of Go leans on: Stringer, error and io.Reader.",
+          "build": [
+            "`Rect` and `Circle` with value-receiver `Area`, `Perimeter` and `String`, and the `Shape` interface",
+            "`(*Rect).Scale` with a pointer receiver, and variadic `TotalArea(shapes ...Shape)`",
+            "`FetchError` (Error and Unwrap) and `ErrNegativeSqrt` with `Sqrt`",
+            "`Describe(v any) string` with a type switch",
+            "`Rot13Reader`, an io.Reader wrapping an io.Reader, and `CountWords(r io.Reader)` built on `collections.WordCount`"
+          ],
+          "win": "Shapes measure and print themselves, Scale changes the rect in place, both error types have exact messages and unwrap, Describe sorts 16 values into the right cases, Rot13Reader passes iotest.TestReader, and CountWords reuses WordCount.",
+          "go": [
+            "methods and receivers",
+            "methods are functions",
+            "method expressions",
+            "methods on non-struct types",
+            "value vs pointer receivers",
+            "automatic & and * on method calls",
+            "method sets",
+            "interfaces",
+            "implicit satisfaction",
+            "interface values (value, type)",
+            "nil inside an interface vs a nil interface",
+            "any (the empty interface)",
+            "type assertions and comma ok",
+            "type switches",
+            "fmt.Stringer",
+            "%g, %q, %T",
+            "the error interface",
+            "custom error types",
+            "Unwrap, errors.Is, errors.As",
+            "the recursive Error trap",
+            "variadic functions",
+            "io.Reader",
+            "io.EOF",
+            "wrapping readers",
+            "io.ReadAll"
+          ],
+          "pkgs": [
+            "fmt",
+            "math",
+            "io",
+            "errors",
+            "strings"
+          ],
+          "hints": [
+            "Methods go outside the struct: `func (r Rect) Area() float64`. Use value receivers for everything except Scale, which needs `(r *Rect)` to change the caller's rect. `%g` prints 3 and 0.5 without trailing zeros.",
+            "In Describe the first matching case wins, so the order is nil, int, string, error, Shape, fmt.Stringer, default. In ErrNegativeSqrt's Error, print `float64(e)`, never `e` itself, or Error calls itself forever (go vet will tell you).",
+            "Rot13Reader.Read: `n, err := r.R.Read(p)`, rot13 each byte of `p[:n]` (for lowercase, `'a' + (b-'a'+13)%26`; same for uppercase), then `return n, err`. Convert before looking at err, because n > 0 can arrive together with io.EOF. CountWords is io.ReadAll followed by collections.WordCount(string(b))."
+          ],
+          "unlock": "Interfaces kit",
+          "idea": "Behaviour hangs off types as methods; interfaces are satisfied implicitly, by having the methods",
+          "difficulty": 2,
+          "consumes": [
+            "Collections kit"
+          ],
+          "wild": "io.Reader and io.Writer are the most used interfaces in Go: gzip, bufio and cipher readers all wrap readers the way Rot13Reader does; fs.PathError and url.Error are struct errors with Unwrap, the same shape as FetchError"
+        },
+        {
+          "id": "P.5",
+          "title": "Generics",
+          "brief": "Write functions and a container that work for any element type, with the compiler still checking every call.",
+          "build": [
+            "`Index[T comparable]`, `Map[T, U any]` and `Max[T cmp.Ordered]`",
+            "`Largest[S shapes.Shape]`, which returns the concrete shape type it was given",
+            "`Set[T comparable]` on a `map[T]struct{}`, with `NewSet`, `Add` (true if new), `Has` and `Len`"
+          ],
+          "win": "Index, Map and Max work across ints, strings, floats, structs and named types; Largest returns a Rect for a []Rect and keeps the first of a tie; Set counts each value once, zero values included.",
+          "go": [
+            "type parameters",
+            "constraints",
+            "comparable",
+            "any as a constraint",
+            "type inference",
+            "explicit instantiation",
+            "cmp.Ordered",
+            "type sets with | and ~",
+            "var zero T",
+            "several type parameters",
+            "function values as parameters",
+            "method interfaces as constraints",
+            "why []T doesn't convert to []Interface",
+            "generic types",
+            "methods on generic types",
+            "the empty struct",
+            "map[T]struct{} as a set"
+          ],
+          "pkgs": [
+            "cmp"
+          ],
+          "hints": [
+            "Type parameters go in square brackets before the normal parameters: `func Index[T comparable](s []T, x T) int`. Callers rarely write the type; the compiler infers it from the arguments.",
+            "For Max and Largest, start from `s[0]`, loop over `s[1:]` and replace only on `>`, so the first of a tie wins. For an empty slice, `var zero T` then `return zero, false`. In Map, either `make([]U, 0, len(s))` and append, or `make([]U, len(s))` and assign by index, not both.",
+            "Set is `type Set[T comparable] struct{ m map[T]struct{} }`; NewSet makes the map; the methods use `(s *Set[T])`. Add checks `_, ok := s.m[v]` first and returns false if ok; otherwise it stores `struct{}{}` and returns true."
+          ],
+          "unlock": "Generics kit",
+          "idea": "Type parameters with constraints: comparable, cmp.Ordered and ordinary interfaces",
+          "difficulty": 2,
+          "consumes": [
+            "Interfaces kit"
+          ],
+          "wild": "The standard library's slices and maps packages are written exactly like this; sync/atomic.Pointer[T] and iter.Seq[V] are generic types; map[T]struct{} is the set idiom everywhere because the standard library ships no set"
+        },
+        {
+          "id": "P.6",
+          "title": "Concurrency",
+          "brief": "Build a concurrent crawler over an in-memory web: a goroutine per page, a mutex-guarded Set, timeouts with select, and no races or leaks.",
+          "build": [
+            "`Fetcher` interface, `Page`, and `FakeFetcher map[string]Page` with `ErrNotFound`",
+            "`TimeoutFetcher`: wraps a Fetcher with a goroutine, a buffered channel and `select` on `time.After`, and leaks nothing",
+            "`Crawl(start, depth, f) Report`: level by level, one goroutine per URL, a `sync.WaitGroup` per level",
+            "Each URL fetched once via a mutex-guarded `generic.Set[string]`; pages counted with `collections.WordCount`; failures reported as `*shapes.FetchError`"
+          ],
+          "win": "Crawl finds exactly the pages within the depth (the shortest route counts), fetches each URL once, runs a level's fetches in parallel, reports failures as FetchErrors wrapping the cause, times out slow pages without leaking a goroutine, and passes under -race.",
+          "go": [
+            "goroutines",
+            "go func() { ... }()",
+            "sync.WaitGroup",
+            "per-iteration loop variables",
+            "data races",
+            "the race detector",
+            "concurrent map access",
+            "sync.Mutex and defer Unlock",
+            "channels",
+            "unbuffered channels as a meeting point",
+            "buffered channels",
+            "close and range over a channel",
+            "comma ok on a receive",
+            "receive-only channel types",
+            "select",
+            "time.After and timeouts",
+            "default in select",
+            "goroutine leaks",
+            "decorating an interface",
+            "breadth-first crawling"
+          ],
+          "pkgs": [
+            "sync",
+            "time",
+            "errors",
+            "fmt"
+          ],
+          "hints": [
+            "FakeFetcher is a map type, so its Fetch is a comma-ok lookup. For TimeoutFetcher, define a small result struct, `ch := make(chan result, 1)`, start the inner Fetch in a goroutine that sends on ch, then `select` between `<-ch` and `<-time.After(t.Timeout)`. The buffer of 1 is what lets that goroutine finish after a timeout.",
+            "Crawl level by level: `seen.Add(start)`, `frontier := []string{start}`, then `for range depth`, stopping early if the frontier is empty. Each level gets a WaitGroup, a Mutex and a `next` slice: one goroutine per URL, then Wait, then `frontier = next`.",
+            "Inside each goroutine, fetch first, without the lock. Then Lock (with defer Unlock): on error append `&shapes.FetchError{URL: url, Err: err}` and return; otherwise set `rep.Pages[url] = collections.WordCount(body)` and, for each link, `if seen.Add(link) { next = append(next, link) }`. Make rep.Pages before the loop."
+          ],
+          "unlock": "Crawler",
+          "idea": "Goroutines do the work, a WaitGroup waits for it, a Mutex guards what they share, and channels with select carry results and timeouts",
+          "difficulty": 3,
+          "consumes": [
+            "Collections kit",
+            "Interfaces kit",
+            "Generics kit"
+          ],
+          "wild": "golang.org/x/sync/errgroup and semaphore are built from these same parts; crawlers such as gocolly/colly add depth and per-host limits on top; context.Context is how real code cancels the goroutines it starts"
+        }
+      ]
+    },
+    {
       "key": "0",
       "name": "Boot Sector",
       "optional": false,

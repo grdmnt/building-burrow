@@ -202,6 +202,9 @@ func machineLines(w *world, width int, a machineAnim) []string {
 func powerLine(w *world, a machineAnim) string {
 	var built, total, addBuilt, addTotal int
 	for _, l := range w.cur.flat {
+		if l.ch.Key == "P" {
+			continue // the Primer teaches Go; it isn't a part of the machine
+		}
 		done := w.levelDone(l) || l.ID == a.part
 		if l.ch.Optional {
 			addTotal++
