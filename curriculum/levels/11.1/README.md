@@ -19,7 +19,23 @@ err := wire.ServeConns(ln, func(conn net.Conn) {
 
 **devcluster (9.1 · Multi-core).** `devcluster` starts the nodes. For this level it gains a mode where each node listens on a port 100 above its usual one, while every `-peers` list still names the usual ports, which are now the proxy's. All peer traffic flows through `chaos`.
 
-**JSON API (7.2 · JSON In and Out).** The admin API is four `POST`s and a `GET`, decoded and encoded with the same two helpers as the main API: `decodeJSON` with `DisallowUnknownFields` and a size limit, `writeJSON` for the reply. Export them from `api` (or copy the twenty lines) and the handlers are a few lines each:
+**JSON API (7.2 · JSON In and Out).** The admin API is four `POST`s and a `GET`, and it handles JSON the way 7.2 taught: `json.NewDecoder` with `DisallowUnknownFields` and a size limit on the way in, the `Content-Type` header, the status and `json.NewEncoder` on the way out, and errors shaped like `api.ErrorResponse`. `chaos` is its own small program, so it does this with `encoding/json` directly, through two tiny helpers of its own:
+
+```go
+func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+```
+
+With those, each handler is a few lines:
 
 ```go
 mux.HandleFunc("POST /partition", func(w http.ResponseWriter,
@@ -27,13 +43,13 @@ mux.HandleFunc("POST /partition", func(w http.ResponseWriter,
 	var req struct {
 		Nodes []string `json:"nodes"`
 	}
-	if err := api.DecodeJSON(w, r, &req); err != nil {
-		api.WriteJSON(w, 400,
-			api.ErrorResponse{Code: "invalid_request"})
+	if err := readJSON(w, r, &req); err != nil {
+		writeJSON(w, 400, api.ErrorResponse{
+			Code: "invalid_request", Error: err.Error()})
 		return
 	}
 	p.partition(req.Nodes)
-	api.WriteJSON(w, 200, p.state())
+	writeJSON(w, 200, p.state())
 })
 ```
 
@@ -79,7 +95,7 @@ A `*rand.Rand` is not safe for concurrent use, so guard the one generator with a
 2. For each link, listen and `ServeConns`. The handler dials the target, runs the two copy goroutines with half-close, and closes both ends when done.
 3. Write the chunked copy with the delay applied per chunk: sleep `ms` plus a draw from `[0, jitter_ms)` from the seeded generator. Decide the drop once per new connection, right after accept: with probability `rate`, close it.
 4. Keep the rule set behind a mutex, with a counter of connections per link; `GET /state` returns it all.
-5. Serve the admin API on `-admin` with the 7.2 helpers: `POST /partition`, `/heal`, `/delay`, `/drop`, `GET /state`.
+5. Write `readJSON` and `writeJSON` in `cmd/chaos` and serve the admin API on `-admin` with them: `POST /partition`, `/heal`, `/delay`, `/drop`, `GET /state`.
 6. Give `devcluster` a `-via-chaos` mode (node `i` listens on `base-port+100+i`, `-peers` names `base-port+i`) and try the partition scenario by hand.
 
 ## Example
@@ -126,7 +142,7 @@ What this level builds:
 
 - Bidirectional copy with half-close
 - Rule evaluation per link
-- JSON admin API using the 7.2 helpers
+- JSON admin API with two small `encoding/json` helpers of its own
 - Seeded rand
 
 Decisions the tests rely on:
@@ -163,4 +179,4 @@ Toxiproxy, Jepsen's nemesis, tc netem
 
 bidirectional copying · half-close · seeded randomness
 
-Standard library: `net`, `io`, `math/rand/v2`, `net/http`
+Standard library: `net`, `io`, `math/rand/v2`, `net/http`, `encoding/json`

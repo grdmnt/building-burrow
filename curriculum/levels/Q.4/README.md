@@ -10,7 +10,7 @@ Two things get learned. How a message broker you built compares to a product peo
 
 ## What you're using from before
 
-**Competing consumers (Q.3 · Competing Consumers).** The finished broker and its client: `Send`, batch peek-lock `Receive`, `Complete`, `Abandon`, `DeadLetter`, `RenewLock`, and a `Receiver` with prefetch. It is one of the two backends under test, and its client is what the Burrow side of the scenario interface calls:
+**Competing consumers (Q.3 · Competing Consumers).** The finished broker and its client: `Send`, batch peek-lock `ReceiveBatch`, `Complete`, `Abandon`, `DeadLetter`, `RenewLock`, and a `Receiver` with prefetch. It is one of the two backends under test, and its client is what the Burrow side of the scenario interface calls:
 
 ```go
 type Backend interface {
@@ -54,7 +54,7 @@ A `replace` is committed and travels with the module. A `go.work` is for your ma
 | Burrow | azservicebus |
 |---|---|
 | `Send` | `Sender.SendMessage` |
-| `Receive(max)` | `Receiver.ReceiveMessages(ctx, max, nil)` |
+| `ReceiveBatch(max)` | `Receiver.ReceiveMessages(ctx, max, nil)` |
 | `Complete(token)` | `Receiver.CompleteMessage(ctx, msg, nil)` |
 | `Abandon(token)` | `Receiver.AbandonMessage` |
 | `DeadLetter(token, reason, desc)` | `Receiver.DeadLetterMessage` with `DeadLetterOptions` |

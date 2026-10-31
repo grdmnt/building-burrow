@@ -37,7 +37,12 @@ for _, v := range checker.Check(ops) {
 curl -X POST ':9000/partition' -d '{"nodes":["n1"]}'
 ```
 
-The scenario runner itself is the `cmd/scenario` from 11.4; it gains one flag.
+**Burrow v1 (11.4 · Leader Down).** `cmd/scenario`, the runner that starts the proxy and the cluster, runs every probe, kills, partitions and heals on a timeline from one `-seed`, and hands the history to the checker. It is the experiment, unchanged except for one new flag; ten clean seeded runs against Raft are the baseline the Dynamo runs are compared with:
+
+```bash
+go run ./cmd/scenario -seed 7                    # raft: no violations
+go run ./cmd/scenario -seed 7 -backend dynamo    # same attack
+```
 
 ## What's new here
 

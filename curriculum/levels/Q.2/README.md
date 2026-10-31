@@ -4,7 +4,7 @@
 
 ## Your goal
 
-Q.1's `Receive` deletes a message the moment it hands it out. A consumer that crashes right after loses it. Here you add *peek-lock*: a receive that locks the message for a short time instead of deleting it. The consumer works, then *settles*: `Complete` deletes it, `Abandon` puts it straight back, `DeadLetter` moves it to a holding queue for messages that can't be processed, and `RenewLock` buys more time. If the consumer never settles, the lock runs out and the message becomes available again, with its delivery count bumped. After ten failed deliveries it goes to the dead-letter queue on its own.
+Q.1's `Receive` deletes a message the moment it hands it out. A consumer that crashes right after loses it. `Receive` stays exactly as it is for callers that accept that; next to it you add *peek-lock*: a receive that locks the message for a short time instead of deleting it. The consumer works, then *settles*: `Complete` deletes it, `Abandon` puts it straight back, `DeadLetter` moves it to a holding queue for messages that can't be processed, and `RenewLock` buys more time. If the consumer never settles, the lock runs out and the message becomes available again, with its delivery count bumped. After ten failed deliveries it goes to the dead-letter queue on its own.
 
 This turns at-most-once into *at-least-once* delivery: a message can be delivered twice, but it is never lost. A lock that expires by itself is a *lease*, and you built leases in chapter 1. The lock table here is literally that store.
 

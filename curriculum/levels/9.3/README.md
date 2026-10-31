@@ -189,6 +189,6 @@ golang.org/x/sync/errgroup (with a twist); Cassandra's quorum coordinator; this 
 
 ## New in Go
 
-generics (type parameters, generic structs) · constraints: any, comparable, cmp.Ordered and ~T · fan-out/fan-in · context cancellation · errors.Join
+generics (type parameters, generic structs) · constraints: any, comparable, cmp.Ordered and ~T · fan-out/fan-in · errors.Join
 
 Standard library: `context`, `sync`, `errors`, `cmp`

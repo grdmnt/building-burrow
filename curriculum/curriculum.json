@@ -1298,30 +1298,34 @@
         {
           "id": "8.1",
           "title": "Lease Lock",
-          "brief": "A distributed lock from CompareAndSwapWithTTL and Touch; the version is the fencing token.",
-          "idea": "A lock built from CAS + TTL + Touch, and why the version is a fencing token",
+          "brief": "A distributed lock from CompareAndSwapWithTTL and Touch, with fencing tokens from a counter key that is never deleted.",
+          "idea": "A lock built from CAS + TTL + Touch, and why the fencing token can't be the lock key's own version",
           "difficulty": 3,
           "build": [
-            "Acquire/TryAcquire via CAS if_version 0 + ttl",
-            "A keepalive goroutine touching at ttl/3 and closing Done on failure",
-            "Release via CompareAndDelete; fencing token"
+            "Acquire/TryAcquire: create `<key>` holding a random owner ID via CAS if_version 0 + ttl",
+            "Token from `Set(key+\".fence\", owner)`, then Get to verify the owner ID (ErrLost if not)",
+            "A keepalive goroutine touching at ttl/3, checking the owner ID and closing Done on loss",
+            "Release: check the owner ID, then CompareAndDelete with the lock version; the fence key is never deleted"
           ],
-          "win": "Two clients contend for one key on a fake clock: exactly one holds at a time, a holder whose process stops touching loses the lock after ttl, the next holder's token is larger, and Release by a stale holder fails with ErrLost.",
+          "win": "Two clients contend for one key on a fake clock: exactly one holds at a time, a holder whose process stops touching loses the lock after ttl, every later holder's token is larger (also after an expiry), a holder whose lease runs out before it verifies gets ErrLost, and Release by a stale holder fails with ErrLost.",
           "go": [
             "composition of primitives",
+            "random owner IDs with crypto/rand",
             "keepalive goroutines",
-            "fencing tokens",
+            "fencing tokens from a counter key",
             "fake clocks across client and server"
           ],
           "pkgs": [
             "context",
             "time",
-            "sync"
+            "sync",
+            "crypto/rand",
+            "encoding/hex"
           ],
           "hints": [
-            "Acquire is a loop over CompareAndSwapWithTTL with ifVersion 0: one atomic call creates the lock with its lease. The JSON API's PutRequest carries both if_version and ttl.",
-            "Keepalive: Touch every ttl/3; after two consecutive failures past ttl/2 assume the lease is gone and close Done.",
-            "The version returned by the successful CAS is your fencing token. Read Kleppmann's 'How to do distributed locking' and then write down why Release needs CompareAndDelete."
+            "The lock key is created at Version 1 by every holder, because a deleted or expired key starts over. So its version can't be the token; take the token from Set on `<key>.fence`, a key you never delete and never give a TTL.",
+            "Acquire, take the token, then Get the lock key: if it no longer holds your owner ID, the lease ran out in between and you must return ErrLost instead of using the token.",
+            "Release and the keepalive both check the owner ID, because CompareAndDelete with Version 1 and Touch can't tell one holder's lock from the next. Read Kleppmann's 'How to do distributed locking'."
           ],
           "unlock": "Lease lock",
           "consumes": [
@@ -1339,21 +1343,23 @@
           "difficulty": 3,
           "build": [
             "`Broker` with buffered subscriber channels and select/default",
+            "`Publish(ev) error`: assigns last+1 when ev.ID is 0, keeps a larger caller ID, refuses a stale one with ErrStaleID",
+            "`WithStartID(id)` option to NewBroker",
             "`Wrap` decorating a Store",
             "Expire events via OnEvict"
           ],
-          "win": "With one subscriber that never reads, 1,000 writes take no longer than with none and that subscriber is dropped; fast subscribers see every event in order with increasing IDs, including expiries.",
+          "win": "With one subscriber that never reads, 1,000 writes take no longer than with none and that subscriber is dropped; fast subscribers see every event in order with increasing IDs, including expiries; a caller's ID at or below the last is refused.",
           "go": [
             "buffered channels",
             "select with default",
             "unsubscribe functions",
-            "decorator over an interface",
-            "sync.Once"
+            "decorator over an interface"
           ],
           "pkgs": [
             "sync",
             "context",
-            "strings"
+            "strings",
+            "errors"
           ],
           "hints": [
             "`select { case ch <- ev: default: drop(sub) }`.",
@@ -1376,7 +1382,9 @@
           "build": [
             "The SSE handler with http.NewResponseController Flush",
             "Heartbeats",
-            "Unsubscribe on r.Context().Done()"
+            "Unsubscribe on r.Context().Done()",
+            "The watch route outside 7.4's Timeout, and a `watchers` expvar on the 7.6 admin port",
+            "burrowd's broker made with WithStartID from the boot time"
           ],
           "win": "curl -N prints an event within a second of a PUT; closing curl drops the watcher count; a 15 s silence carries a heartbeat.",
           "go": [
@@ -1400,7 +1408,9 @@
           "consumes": [
             "Broker",
             "JSON API",
-            "Middleware chain"
+            "Middleware chain",
+            "Deadline guard",
+            "Admin port"
           ],
           "wild": "SSE as used by OpenAI/Anthropic streaming APIs and Kubernetes watch (chunked JSON); WebSockets when you need duplex"
         },
@@ -1411,11 +1421,12 @@
           "idea": "Replay-then-live handover without gaps or duplicates",
           "difficulty": 3,
           "build": [
-            "Ring buffer with head index",
+            "Ring buffer with head index and a floor",
             "SubscribeFrom: subscribe, replay, skip duplicates",
+            "ErrCannotResume for an ID below the floor or above the newest published ID",
             "Last-Event-ID in the handler"
           ],
-          "win": "Kill the client, write 5 keys, reconnect with Last-Event-ID: the 5 missed events arrive first, then live ones, with no gaps or duplicates; an ID older than the buffer yields a reset event.",
+          "win": "Kill the client, write 5 keys, reconnect with Last-Event-ID: the 5 missed events arrive first, then live ones, with no gaps or duplicates; an ID older than the buffer, or newer than anything the server has published, yields a reset event.",
           "go": [
             "ring buffers",
             "race-free handover",
@@ -1448,7 +1459,7 @@
             "Watch as a range-over-func iterator",
             "Reconnect with Last-Event-ID"
           ],
-          "win": "A consumer `for ev, err := range c.Watch(ctx, \"user:\", 0)` sees every write in order across a server restart, and breaking out of the loop closes the HTTP response and leaves no goroutine.",
+          "win": "A consumer `for ev, err := range c.Watch(ctx, \"user:\", 0)` sees every write in order across a dropped connection, gets watch.ErrReset after a server restart, and breaking out of the loop closes the HTTP response and leaves no goroutine.",
           "go": [
             "iter.Seq2 producers",
             "bufio line parsing",
@@ -1497,7 +1508,8 @@
           "build": [
             "Node flags",
             "`os/exec` with StdoutPipe and a prefixing scanner",
-            "Readiness polling",
+            "Readiness polling on /readyz with a short-timeout http.Client",
+            "`-data <dir>` (dir/node<i>, kept on exit); temp dirs removed otherwise",
             "Clean teardown"
           ],
           "win": "go run ./cmd/devcluster starts n1 to n3 with prefixed logs and prints `cluster ready`; after Ctrl-C, pgrep burrowd finds nothing.",
@@ -1511,18 +1523,19 @@
             "os/exec",
             "flag",
             "bufio",
-            "io"
+            "io",
+            "os",
+            "net/http"
           ],
           "hints": [
             "cmd.StdoutPipe() plus a bufio.Scanner gives you lines to prefix.",
             "exec.CommandContext kills children when the context ends.",
-            "Give each node its own -data directory."
+            "Without -data, give each node a temp dir and remove it on exit; with -data <dir>, node i uses <dir>/node<i> and keeps it."
           ],
           "unlock": "devcluster",
           "consumes": [
             "Durable daemon",
-            "Admin port",
-            "HTTP client lib"
+            "Admin port"
           ],
           "wild": "goreman/foreman, docker compose, kind; the readiness loop is what Kubernetes does for you"
         },
@@ -1580,7 +1593,6 @@
             "generics (type parameters, generic structs)",
             "constraints: any, comparable, cmp.Ordered and ~T",
             "fan-out/fan-in",
-            "context cancellation",
             "errors.Join"
           ],
           "pkgs": [
@@ -1721,7 +1733,8 @@
           "consumes": [
             "Replicated log",
             "Memory store",
-            "Broker"
+            "Broker",
+            "Resumable stream"
           ],
           "wild": "etcd's mvcc apply path; the FSM in hashicorp/raft"
         },
@@ -1852,7 +1865,7 @@
           "build": [
             "Bidirectional copy with half-close",
             "Rule evaluation per link",
-            "JSON admin API using the 7.2 helpers",
+            "JSON admin API with two small encoding/json helpers of its own",
             "Seeded rand"
           ],
           "win": "curl -X POST :9000/partition isolates n1, the other two elect a leader, and heal reunites the cluster.",
@@ -1865,7 +1878,8 @@
             "net",
             "io",
             "math/rand/v2",
-            "net/http"
+            "net/http",
+            "encoding/json"
           ],
           "hints": [
             "Two goroutines per proxied connection, one per direction; CloseWrite on the other side when one ends.",
@@ -2187,13 +2201,13 @@
         {
           "id": "T.1",
           "title": "Token Bucket",
-          "brief": "Rate-limit clients by IP with a token bucket middleware.",
+          "brief": "Rate-limit clients by IP with a token bucket Limiter and its middleware.",
           "idea": "Lazy refill arithmetic per client, as middleware, with a sweeper for stale buckets",
           "difficulty": 2,
           "build": [
-            "Bucket math with an injected clock (WithClock)",
-            "429 + Retry-After",
-            "Sweeper with Close"
+            "`NewLimiter(rate, burst, opts...)` with bucket math on an injected clock (`WithLimiterClock`)",
+            "`(*Limiter).Middleware()`: 429 + Retry-After",
+            "Idle-bucket sweeper stopped by `(*Limiter).Close()`"
           ],
           "win": "Twenty quick requests show 200s then 429s with Retry-After, and a FakeClock test proves refill at the right rate.",
           "go": [
@@ -2231,7 +2245,7 @@
             "Generic LRU",
             "Invalidate on every mutating method",
             "Single-flight map[string]*call",
-            "Load test through RateLimit + cache"
+            "Load test through the T.1 Limiter + cache"
           ],
           "win": "Tests prove eviction order; with a 50 ms store, 100 concurrent GETs for one cold key cause exactly 1 store read and all 100 get the value; the load test through the rate limiter shows 429s for the abuser and a 95% hit rate for the rest.",
           "go": [
@@ -2523,7 +2537,8 @@
           "consumes": [
             "Quorum replication",
             "Checker",
-            "Chaos proxy"
+            "Chaos proxy",
+            "Burrow v1"
           ],
           "wild": "Jepsen's analyses of Riak and Cassandra"
         }
@@ -2628,7 +2643,7 @@
           "difficulty": 4,
           "build": [
             "sync.Cond per queue",
-            "Batch receive",
+            "`ReceiveBatch(ctx, queue, max)` beside an unchanged Q.1 `Receive`",
             "Prefetch",
             "Fairness test"
           ],

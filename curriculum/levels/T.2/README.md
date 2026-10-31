@@ -18,11 +18,13 @@ lru := cache.NewLRU[string, store.Entry](64<<20, entrySize)
 st := cache.Wrap(store.NewMemory(), lru) // st is a store.Store
 ```
 
-**Rate limiter (T.1 · Token Bucket).** The load test at the end runs through both: the cached store goes into `api.Server`, and the server's handler goes behind `RateLimit`. An abusive client is throttled by the limiter; everyone else is served mostly from the cache.
+**Rate limiter (T.1 · Token Bucket).** The load test at the end runs through both: the cached store goes into `api.Server`, and the server's handler goes behind a `Limiter`'s middleware. An abusive client is throttled by the limiter; everyone else is served mostly from the cache.
 
 ```go
 srv := &api.Server{Store: st} // st from cache.Wrap above
-h := api.Chain(srv.Handler(), api.RateLimit(50, 100))
+lim := api.NewLimiter(50, 100)
+defer lim.Close()
+h := api.Chain(srv.Handler(), lim.Middleware())
 ts := httptest.NewServer(h)
 ```
 
@@ -77,7 +79,7 @@ Delete the `inflight` entry when the call finishes, so the next miss on that key
    - `Keys` passes straight through.
 4. Add the `inflight` map and `call` struct for single-flight, guarded by the same mutex or its own.
 5. Register hit and miss counters with `expvar`.
-6. Write the tests in this order: invalidation, eviction order, single-flight with a store that sleeps 50 ms on `Get`, then a load test through `RateLimit` and the cache.
+6. Write the tests in this order: invalidation, eviction order, single-flight with a store that sleeps 50 ms on `Get`, then a load test through the limiter and the cache.
 
 ## Example
 
@@ -120,7 +122,7 @@ st.Get(ctx, "hot") // a miss again; slow.gets is 2, value is v2
 - [ ] 100 concurrent `Get`s of one cold key against a 50 ms store cause exactly one store read, and all 100 get the value
 - [ ] A store error on a miss reaches every waiter of that read and is not cached: the next `Get` reads the store again
 - [ ] `LRU[string, store.Entry]` and a second instantiation with different types both compile and work
-- [ ] Through `RateLimit` and the cache, an abusive client sees 429s while the others get a 95% hit rate
+- [ ] Through the limiter and the cache, an abusive client sees 429s while the others get a 95% hit rate
 
 ## Reference
 
@@ -138,7 +140,7 @@ What this level builds:
 - Generic LRU
 - Invalidate on every mutating method
 - Single-flight map[string]*call
-- Load test through RateLimit + cache
+- Load test through the Limiter + cache
 
 ## The tests check
 

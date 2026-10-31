@@ -8,6 +8,8 @@ Write a `watch` package with a `Broker`: an in-process publish/subscribe hub. A 
 
 The one rule that makes this hard: a subscriber that stops reading must not stall the writer. The broker drops it instead. This is the engine behind the HTTP watch endpoint in the next level.
 
+Every event carries an `ID`, and IDs only go up. Usually the broker picks it (one more than the last). A caller may also bring its own, as long as it is above the last one; chapter 10 uses that to number events by Raft log index.
+
 ## What you're using from before
 
 **Memory store (1.1 · Register File).** `store.Store` is the interface every engine satisfies. `Wrap` takes one and returns a `*watch.Store` that is also a `store.Store`, with the same methods, plus publishing. The caller can't tell the difference:
@@ -46,7 +48,7 @@ default:
 
 A dropped subscriber has its channel closed and is removed. Closing tells the reader "you fell behind" the moment it next reads, which is the only honest thing to do. Only the broker closes subscriber channels, because closing a channel twice panics and so does sending on a closed one.
 
-**Returning an unsubscribe function.** `Subscribe` returns the channel and a `func()`. The caller `defer`s it. There is no handle type to learn and no ID to pass back. Make it safe to call twice with `sync.Once`, so a subscriber that was dropped by the broker and then unsubscribes itself does no harm:
+**Returning an unsubscribe function.** `Subscribe` returns the channel and a `func()`. The caller `defer`s it. There is no handle type to learn and no ID to pass back. Make it safe to call twice with `sync.Once` from 1.5, so a subscriber that was dropped by the broker and then unsubscribes itself does no harm:
 
 ```go
 ch, stop := b.Subscribe("user:")
@@ -74,15 +76,27 @@ func (s *Store) Set(ctx context.Context, key string, v []byte) (
 }
 ```
 
-This is the same embedding move as the `ResponseWriter` wrapper in 7.3, applied to your own interface.
+This is the same embedding move as the `ResponseWriter` wrapper in 7.3, applied to your own interface. `Publish` can only fail for an ID the caller chose, and the wrapper never chooses one, so it ignores the error.
+
+**IDs that only go up.** The broker keeps `last`, the ID of the last event it published. `Publish` with `ev.ID == 0` sets `ev.ID = last+1`. `Publish` with `ev.ID != 0` keeps the caller's ID, but only if it is greater than `last`; otherwise it returns `ErrStaleID` and delivers nothing. Either way `last` becomes the new ID. Subscribers can then rely on one thing: IDs in their channel strictly increase.
+
+`WithStartID(id)` is an option to `NewBroker` that sets `last` to `id` before anything is published, so the first assigned ID is `id+1`. The next level uses it to make a restarted server's IDs larger than any from before the restart:
+
+```go
+b := watch.NewBroker(16, watch.WithStartID(1000))
+b.Publish(watch.Event{Type: "put"})           // ID 1001
+b.Publish(watch.Event{ID: 2000, Type: "put"}) // keeps 2000
+err := b.Publish(watch.Event{ID: 1500})       // ErrStaleID, dropped
+b.Publish(watch.Event{Type: "put"})           // ID 2001
+```
 
 ## What to do
 
-1. Create `watch/broker.go`, `package watch`, with `Event`, `Broker`, `NewBroker`.
-2. Keep a mutex, a counter for the next event ID, and the set of subscribers. Each subscriber holds its prefix, its channel and a `sync.Once` for unsubscribing.
+1. Create `watch/broker.go`, `package watch`, with `Event`, `Broker`, `NewBroker`, `BrokerOption`, `WithStartID` and `ErrStaleID`.
+2. Keep a mutex, `last` (the ID of the last published event, 0 or the `WithStartID` value to begin with), and the set of subscribers. Each subscriber holds its prefix, its channel and a `sync.Once` for unsubscribing.
 3. Write `Subscribe(prefix)`: make a channel with `buffer` room, add the subscriber under the lock, return the channel and a stop function that removes it and closes the channel, once.
-4. Write `Publish(ev)`: under the lock, assign the next ID (set `ev.ID`), then for each subscriber whose prefix matches `ev.Entry.Key` (`strings.HasPrefix`), try a non-blocking send. On a full buffer, drop that subscriber: remove it and close its channel.
-   - Assigning the ID and sending under the same lock is what keeps IDs increasing in every channel.
+4. Write `Publish(ev)`: under the lock, settle the ID. If `ev.ID` is 0, set it to `last+1`. If it is set and not above `last`, return `ErrStaleID` and deliver nothing. Set `last = ev.ID`. Then for each subscriber whose prefix matches `ev.Entry.Key` (`strings.HasPrefix`), try a non-blocking send. On a full buffer, drop that subscriber: remove it and close its channel.
+   - Settling the ID and sending under the same lock is what keeps IDs increasing in every channel.
 5. Create `watch/store.go` with `Store` embedding `store.Store`, and `Wrap`.
 6. Override `Set`, `SetWithTTL`, `CompareAndSwap`, `CompareAndSwapWithTTL` to publish `put` with the returned entry, and `Delete`, `CompareAndDelete` to publish `delete` with `Entry{Key: key}`. Publish only when the call succeeded.
 7. Write `(s *Store) OnEvict(e store.Entry)`: publish `expire` with `e`. It is called from the janitor's goroutine or a reader, so it must not need any lock a store call holds (the broker's own lock is fine).
@@ -124,6 +138,8 @@ fmt.Println(ok)                  // false: the broker closed it
 ## Done when
 
 - [ ] Three fast subscribers each see every matching event, in order, with increasing IDs
+- [ ] `Publish` with ID 0 assigns one more than the last ID; a caller's ID above the last is kept; a caller's ID at or below the last returns `ErrStaleID` and reaches nobody
+- [ ] With `WithStartID(1000)` the first assigned ID is 1001
 - [ ] A subscriber that never reads is dropped (its channel is closed) and 1,000 writes are not measurably slower than with no subscriber
 - [ ] A key with a TTL on a fake clock produces an `expire` event carrying the entry after the clock passes its expiry
 - [ ] Calling the stop function twice is fine; publishing after every subscriber has left is fine
@@ -141,10 +157,20 @@ type Event struct {
 	Entry store.Entry
 }
 
-type Broker struct { /* yours */ }
+var ErrStaleID = errors.New("watch: event id not above the last")
 
-func NewBroker(buffer int) *Broker
-func (b *Broker) Publish(ev Event)
+type Broker struct { /* yours */ }
+type BrokerOption func(*Broker)
+
+func NewBroker(buffer int, opts ...BrokerOption) *Broker
+
+// WithStartID makes the first assigned ID id+1.
+func WithStartID(id uint64) BrokerOption
+
+// Publish assigns last+1 when ev.ID is 0. A non-zero ev.ID is kept if
+// it is above the last published ID; otherwise ErrStaleID and the
+// event is dropped.
+func (b *Broker) Publish(ev Event) error
 
 // Subscribe returns a channel of events whose key starts with prefix
 // and a stop function. The channel is closed and the subscriber removed
@@ -159,6 +185,7 @@ func (s *Store) OnEvict(e store.Entry)
 ```
 
 - `Broker` with buffered subscriber channels and select/default
+- IDs that strictly increase: assigned by the broker, or the caller's if above the last; `WithStartID` sets where assigned IDs begin
 - `Wrap` decorating a Store, overriding the six mutating methods
 - Expire events via `OnEvict`, closing the loop with 1.5
 - Only the broker closes subscriber channels; unsubscribe is safe to call twice
@@ -172,6 +199,7 @@ Pass when: with one subscriber that never reads, 1,000 writes take no longer tha
 The suite will cover:
 
 - Ordering and completeness for 3 fast subscribers
+- ID rules: 0 is assigned last+1, a caller's larger ID is kept, a caller's ID at or below the last is ErrStaleID and delivered to nobody; WithStartID(1000) gives 1001 first
 - A stuck subscriber is dropped and writers are not delayed (timed)
 - Expiry on a FakeClock produces an expire event with the entry
 - Unsubscribe twice is safe; publishing after all unsubscribed is fine
@@ -192,6 +220,6 @@ NATS core pub/sub semantics; Go's own event bus idiom; Redis keyspace notificati
 
 ## New in Go
 
-buffered channels · select with default · unsubscribe functions · decorator over an interface · sync.Once
+buffered channels · select with default · unsubscribe functions · decorator over an interface
 
-Standard library: `sync`, `context`, `strings`
+Standard library: `sync`, `context`, `strings`, `errors`

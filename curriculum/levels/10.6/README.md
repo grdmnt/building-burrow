@@ -92,18 +92,19 @@ for rec, err := range l.Records() { // l is the *wal.Log
 5. Snapshot when the log passes a threshold: `Memory.Snapshot()` with the applied index and term in front, written with the 4.4 tmp/rename sequence; then rewrite the log keeping entries from `min(matchIndex)` onward.
 6. Implement recovery: snapshot, then replay; start with the persisted term.
 7. Measure a write storm with group commit: 100 clients writing through `burrow.Client` on loopback should sustain at least 2,000 writes per second.
+8. Try a full restart by hand with `devcluster -data ./data`, as in the example. Without `-data` each run gets fresh temp directories and there is nothing to recover.
 
 ## Example
 
-This assumes devcluster gives each node a fixed `./data/<id>` directory (not a temp one), so a second run finds the first run's files.
+Run devcluster with `-data` so every node keeps its directory (`./data/node1` and so on) and a second run finds the first run's files.
 
 ```bash
-$ go run ./cmd/devcluster &
+$ go run ./cmd/devcluster -data ./data &
 $ for i in $(seq 1 100); do
     go run ./cmd/burrowctl -http http://127.0.0.1:8081 set k$i v$i; done
 $ kill -9 $(pgrep burrowd)        # all three, no warning
 $ kill %1                         # and devcluster itself
-$ go run ./cmd/devcluster &
+$ go run ./cmd/devcluster -data ./data &
 $ go run ./cmd/burrowctl -http http://127.0.0.1:8081 get k100
 v100
 $ curl -s localhost:8081/v1/cluster | jq .term
@@ -163,7 +164,7 @@ The suite will cover:
 
 ```bash
 ./burrow watch
-go run ./cmd/devcluster
+go run ./cmd/devcluster -data ./data
 go test -bench=Storm -run='^$' ./raft
 ```
 

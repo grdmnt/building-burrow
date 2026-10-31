@@ -25,6 +25,25 @@ fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.ID, ev.Type, body)
 
 **Middleware chain (7.3 · Signal Chain).** Every request, this one included, runs inside `Chain(mux, Recover(), RequestID(), AccessLog(l))`. `AccessLog` wraps the `ResponseWriter` in a `statusRecorder`. That wrapper has an `Unwrap()` method, and this level is the reason: without it, nothing you write would reach the client until the handler returned.
 
+**Deadline guard (7.4 · Watchdog).** Two of 7.4's limits would kill a stream. The `Timeout(time.Second)` middleware gives every request a 1 s budget, and `http.Server`'s `WriteTimeout` of 30 s cuts off any response still being written after 30 s. The stream keeps both everywhere else. It goes around the first by being registered outside the budgeted part of the chain, and around the second with a per-event write deadline (below):
+
+```go
+budgeted := Chain(s.kvMux(), Timeout(time.Second))
+root := http.NewServeMux()
+root.HandleFunc("GET /v1/watch", s.watch) // no Timeout
+root.Handle("/", budgeted)
+return Chain(root, Recover(), RequestID(), AccessLog(s.Logger))
+```
+
+**Admin port (7.6 · Gauges).** The admin server already serves `expvar` at `/debug/vars`. A live-watcher count is one more `expvar.Int`, raised when a stream opens and lowered when it ends, so an operator can see on `:7071` whether closed tabs really let go:
+
+```go
+var watchers = expvar.NewInt("watchers")
+
+watchers.Add(1)
+defer watchers.Add(-1)
+```
+
 ## What's new here
 
 **Server-sent events.** SSE is text over a normal HTTP response with `Content-Type: text/event-stream`. An event is a few `name: value` lines followed by a blank line. A line starting with `:` is a comment, which is how a server keeps the connection warm without sending an event:
@@ -77,32 +96,42 @@ for {
 }
 ```
 
+**IDs that survive a restart.** A broker made with plain `NewBroker` numbers events from 1 every time the process starts, so after a restart event 41 would be a different event from the 41 a client saw before. `burrowd` makes its broker with `WithStartID` from the boot time instead:
+
+```go
+start := uint64(time.Now().UnixMilli()) << 10
+b := watch.NewBroker(64, watch.WithStartID(start))
+```
+
+Shifting by 10 leaves room for 1,024 events per millisecond the previous process ran, so a restarted server's IDs are always above any ID from before the restart. The next level relies on that to tell a client from before a restart to start over.
+
 ## What to do
 
-1. Give `api.Server` a `Broker *watch.Broker` field and register `GET /v1/watch` on the mux.
-2. In the handler: read `prefix`, subscribe, `defer stop()`.
-3. Write the three headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, status 200) and flush once, so the client sees the stream has opened.
+1. Give `api.Server` a `Broker *watch.Broker` field and register `GET /v1/watch` outside the `Timeout` part of the chain, as shown above.
+2. In `burrowd serve`, make the broker with `WithStartID` from the boot time as above, wrap the store with `watch.Wrap`, and give both to `api.Server`.
+3. In the handler: read `prefix`, subscribe, `defer stop()`.
+4. Write the three headers (`Content-Type: text/event-stream`, `Cache-Control: no-cache`, status 200) and flush once, so the client sees the stream has opened.
    - If `Flush` returns an error, log it with the request's logger and return. The stream cannot work through a writer that can't flush.
-4. Loop with a `select` over the event channel, a heartbeat ticker and `r.Context().Done()`.
+5. Loop with a `select` over the event channel, a heartbeat ticker and `r.Context().Done()`.
    - For an event: set a write deadline, write `id:`, `event:`, `data:` and a blank line, flush. Any write or flush error ends the handler.
    - For a heartbeat tick: write `: heartbeat` and a blank line, flush. Default 15 s; make the interval a field on `api.Server` so a test can shorten it.
    - For a done context or a closed channel: return.
-5. Add an expvar `watchers` gauge to the admin counters from 7.6. Increment on subscribe, decrement on the way out, so you can see live watchers.
-6. Make sure `Timeout` from 7.4 does not wrap this route with a per-request deadline, or every stream ends after the budget.
+6. Add the expvar `watchers` gauge to the admin counters from 7.6. Increment on subscribe, decrement on the way out, so you can see live watchers.
+7. Check that `Timeout` from 7.4 does not wrap this route: a stream that stays open for 5 s still gets events.
 
 ## Example
 
-Terminal one:
+Terminal one (IDs start just above the boot-time start ID):
 
 ```bash
 $ curl -N 'localhost:8080/v1/watch?prefix=user:'
-id: 1
+id: 1836479692800001
 event: put
 data: {"key":"user:1","value":"YW5u","version":1}
 
 : heartbeat
 
-id: 2
+id: 1836479692800002
 event: delete
 data: {"key":"user:1","value":"","version":0}
 
@@ -127,6 +156,8 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 - [ ] With the heartbeat interval shortened, a `: heartbeat` comment arrives during silence
 - [ ] Through the full 7.3 chain, each event reaches the client on its own, not only when the handler returns
 - [ ] A `ResponseWriter` wrapper without `Unwrap` in front of the handler makes it log an error and end the stream instead of hanging
+- [ ] A stream stays open past 7.4's 1 s `Timeout` budget and still delivers events
+- [ ] `burrowd` started twice in a row hands out IDs in the second run that are above every ID from the first
 
 ## Reference
 
@@ -136,12 +167,15 @@ Press Ctrl-C in terminal one and `watchers` drops to 0 within a second.
 //   each event:  id: <n>\nevent: put|delete|expire\ndata: <KV JSON>\n\n
 //   a `: heartbeat` comment every 15s of silence
 // Subscriber count visible in expvar `watchers`.
+// burrowd's broker: NewBroker(64, WithStartID(boot)), where
+// boot = uint64(time.Now().UnixMilli()) << 10.
 ```
 
 - The handler flushes after every event with `http.NewResponseController(w).Flush()`, which reaches the connection through 7.3's `statusRecorder` because that wrapper has `Unwrap()`.
 - A Flush error (or `ok == false` from a comma-ok `w.(http.Flusher)` on a writer that can't flush) means the stream can't work: unsubscribe, log, return.
 - Unsubscribe when `r.Context()` is done.
-- 7.4's write timeout must not apply to this handler: extend the deadline per event with `SetWriteDeadline` through the same controller.
+- 7.4's write timeout must not apply to this handler: extend the deadline per event with `SetWriteDeadline` through the same controller. 7.4's `Timeout` middleware does not wrap this route.
+- `burrowd` builds its broker with `WithStartID` from the boot time, so a restarted server's IDs are above every ID from before.
 
 ## The tests check
 
@@ -156,6 +190,8 @@ The suite will cover:
 - Heartbeat line appears with a shortened interval option
 - Events arrive through the full middleware chain from 7.3 (Unwrap in place), flushed one at a time, not only when the handler returns
 - A ResponseWriter wrapper without Unwrap in front of the handler makes the handler end the stream with a logged error rather than hang
+- A stream outlives the 1 s Timeout budget from 7.4 and keeps delivering events
+- Two burrowd runs in a row: every event ID of the second run is above every ID of the first
 
 ## Try it
 

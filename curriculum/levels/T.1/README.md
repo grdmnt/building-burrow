@@ -4,16 +4,18 @@
 
 ## Your goal
 
-Stop one client from hogging the API. Write `RateLimit`, a middleware that gives every client IP a *token bucket*: a counter that starts full, drops by one for each request, and refills at a steady rate. A request that finds the bucket empty gets `429 Too Many Requests` and a `Retry-After` header saying how long to wait. Buckets for clients you haven't seen in a while are swept away by a background goroutine so the map doesn't grow forever.
+Stop one client from hogging the API. Write a `Limiter` whose middleware gives every client IP a *token bucket*: a counter that starts full, drops by one for each request, and refills at a steady rate. A request that finds the bucket empty gets `429 Too Many Requests` and a `Retry-After` header saying how long to wait. Buckets for clients you haven't seen in a while are swept away by a background goroutine so the map doesn't grow forever.
 
 ## What you're using from before
 
-**Middleware chain (7.3 · Signal Chain).** `Middleware` is `func(http.Handler) http.Handler`, and `Chain` nests them. `RateLimit` returns one, so it slots in next to the others, after `AccessLog` so refused requests still get logged:
+**Middleware chain (7.3 · Signal Chain).** `Middleware` is `func(http.Handler) http.Handler`, and `Chain` nests them. `(*Limiter).Middleware()` returns one, so it slots in next to the others, after `AccessLog` so refused requests still get logged. The limiter itself is a value you keep, because its sweeper has to be stopped:
 
 ```go
+lim := api.NewLimiter(10, 20) // 10 requests/s, bursts of 20
+defer lim.Close()
 h := api.Chain(mux,
 	api.Recover(), api.RequestID(), api.AccessLog(l),
-	api.RateLimit(10, 20), // 10 requests/s, bursts of 20
+	lim.Middleware(),
 )
 ```
 
@@ -31,7 +33,7 @@ b.last = now
 
 **Time arithmetic.** `time.Time` is an instant; `time.Duration` is a length of time (an `int64` of nanoseconds). `t2.Sub(t1)` gives a `Duration`, `d.Seconds()` gives a `float64`, and `time.Duration(x * float64(time.Second))` goes the other way. Tokens are a `float64` because half a token is a real thing: at 2 per second, 250 ms of waiting earns half a token.
 
-**An injected clock.** `time.Now` is a function, so it can be a field: `now func() time.Time`, defaulting to `time.Now`, with an option to replace it, exactly like `store.WithClock` from 1.4. A test then uses `testkit.FakeClock`, calls `Advance(500 * time.Millisecond)` and knows precisely how many tokens came back, with no sleeping.
+**An injected clock.** `time.Now` is a function, so it can be a field: `now func() time.Time`, defaulting to `time.Now`, with an option to replace it, `WithLimiterClock`, exactly like `store.WithClock` from 1.4. A test then uses `testkit.FakeClock`, calls `Advance(500 * time.Millisecond)` and knows precisely how many tokens came back, with no sleeping.
 
 **The client's address.** `r.RemoteAddr` is `"ip:port"` (`"192.0.2.7:51234"`, or `"[::1]:51234"` for IPv6). The port changes on every connection, so key the bucket on the host part only. `net.SplitHostPort` does the split and handles the brackets.
 
@@ -43,16 +45,16 @@ b.last = now
 
 ## What to do
 
-1. Define a bucket (`tokens float64`, `last time.Time`) and a limiter holding the map, a mutex, `rate`, `burst`, the clock, and the sweeper's `stop` and `done` channels.
-2. Write `RateLimit(rate float64, burst int) Middleware`. Give the limiter a way to take a clock and a `Close`, in the shape of 1.4's `WithClock` and 1.5's `Close`; the exact spelling is yours until the suite is written.
-3. In the handler: read the clock once, split the IP out of `r.RemoteAddr`, lock, find or create the bucket, refill, and either take a token and call the next handler, or compute the wait, unlock, and answer 429 with `Retry-After`.
+1. Define a bucket (`tokens float64`, `last time.Time`) and a `Limiter` holding the map, a mutex, `rate`, `burst`, the clock, and the sweeper's `stop` and `done` channels.
+2. Write `NewLimiter(rate float64, burst int, opts ...LimiterOption) *Limiter` and `WithLimiterClock(now func() time.Time) LimiterOption`, in the shape of 1.4's `NewMemory` and `WithClock`.
+3. Write `(l *Limiter) Middleware() Middleware`. In its handler: read the clock once, split the IP out of `r.RemoteAddr`, lock, find or create the bucket, refill, and either take a token and call the next handler, or compute the wait, unlock, and answer 429 with `Retry-After`.
 4. Start the sweeper in the constructor. On each tick, under the lock, delete buckets whose `last` is older than `burst / rate` seconds by the injected clock.
-5. Write `Close` with the 1.5 discipline: `sync.Once`, close `stop`, wait on `done`, idempotent.
+5. Write `(l *Limiter) Close()` with the 1.5 discipline: `sync.Once`, close `stop`, wait on `done`, idempotent. It stops the sweeper; the middleware keeps working, it just stops forgetting idle buckets.
 6. Write a test of your own with `testkit.FakeClock`: fill the bucket, advance the clock, and check exactly the right number of requests pass.
 
 ## Example
 
-Twenty-five quick requests against `RateLimit(5, 20)`:
+Twenty-five quick requests against `NewLimiter(5, 20)`:
 
 ```bash
 $ for i in $(seq 25); do
@@ -70,7 +72,9 @@ And the refill, on a fake clock:
 
 ```go
 clock := testkit.NewFakeClock()
-lim := newLimiter(2, 4, clock.Now)   // 2 tokens/s, burst 4; name yours
+lim := api.NewLimiter(2, 4, api.WithLimiterClock(clock.Now))
+defer lim.Close()
+h := lim.Middleware()(okHandler) // 2 tokens/s, burst 4
 // 4 requests pass, the 5th is 429
 clock.Advance(500 * time.Millisecond) // one token back
 // 1 passes, the next is 429 with Retry-After: 1
@@ -92,14 +96,27 @@ The exact contract the tests will hold you to.
 
 ```go
 // api/ratelimit.go
-func RateLimit(rate float64, burst int) Middleware
+type Limiter struct { /* yours */ }
+type LimiterOption func(*Limiter)
+
+// NewLimiter starts the idle-bucket sweeper; Close stops it.
+func NewLimiter(rate float64, burst int,
+	opts ...LimiterOption) *Limiter
+func WithLimiterClock(now func() time.Time) LimiterOption
+
+// Middleware answers 429 with Retry-After when the client's bucket is
+// empty.
+func (l *Limiter) Middleware() Middleware
+
+// Close stops the sweeper. Safe to call twice.
+func (l *Limiter) Close()
 ```
 
 What this level builds:
 
-- Bucket math with an injected clock (WithClock)
-- 429 + Retry-After
-- Sweeper with Close
+- `NewLimiter` with bucket math on an injected clock (`WithLimiterClock`)
+- `(*Limiter).Middleware()`: 429 + Retry-After
+- Idle-bucket sweeper stopped by `(*Limiter).Close()`
 
 ## The tests check
 
@@ -113,6 +130,7 @@ The suite will cover:
 - Refill at the configured rate on a FakeClock
 - Stale buckets are swept
 - Per-IP isolation
+- Close stops the sweeper (no goroutine left) and is safe to call twice
 
 ## Try it
 

@@ -33,10 +33,21 @@ case opCAS:
 	entry, err = kv.st.CompareAndSwap(ctx, c.Key, c.IfVersion, c.Value)
 ```
 
-**Broker (8.2 · Fan-out).** `b.Publish(watch.Event{...})` fans an event out to every subscriber whose prefix matches. The apply loop publishes after every successful mutation, with `ID` set to the log index rather than a counter of its own:
+**Broker (8.2 · Fan-out).** `b.Publish(watch.Event{...})` fans an event out to every subscriber whose prefix matches. A non-zero `ID` is kept as given, as long as it is above the last one published; otherwise `Publish` returns `ErrStaleID`. The apply loop publishes after every successful mutation and always sets `ID` to the entry's log index. Log indexes only go up, so `Publish` never refuses one. They are the same on every node, and once 10.6 makes the log durable they survive a restart too:
 
 ```go
-kv.broker.Publish(watch.Event{ID: e.Index, Type: "put", Entry: entry})
+ev := watch.Event{ID: e.Index, Type: "put", Entry: entry}
+if err := kv.broker.Publish(ev); err != nil {
+	// ErrStaleID: an index applied twice; a bug in the apply loop
+}
+```
+
+Make these brokers without `WithStartID`. Their IDs come from the log, not from the boot time.
+
+**Resumable stream (8.4 · Resume).** `b.SubscribeFrom(prefix, afterID)` replays every retained event after `afterID` and then goes live, with no gaps and no duplicates, or says `ErrCannotResume`. Because the IDs are log indexes, the ID a client saw on one node means the same entry on every other node, so a watcher can resume on any of them:
+
+```go
+ch, stop, err := b2.SubscribeFrom("user:", 40) // events 41.. on n2
 ```
 
 ## What's new here
@@ -146,6 +157,7 @@ Decisions the tests rely on:
 
 - Every decision a command needs (CAS match, new version) is made in the apply loop, on every node; only `ExpiresAt` is computed by the leader and carried in the command.
 - A watch event's `ID` is the log index of the entry that caused it, so IDs are identical on every node. An entry that changes nothing (a failed CAS, a delete of a missing key) publishes nothing.
+- Each node's broker is made without `WithStartID`; `SubscribeFrom` (8.4) on any node resumes by log index.
 - Writes return the `store.Entry` as applied, including `Version`.
 
 ## The tests check

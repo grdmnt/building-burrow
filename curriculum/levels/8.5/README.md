@@ -4,11 +4,11 @@
 
 ## Your goal
 
-Give `burrow.Client` a `Watch` method. The caller writes `for ev, err := range c.Watch(ctx, "user:", 0)` and gets events one at a time, as if looping over a slice. Underneath, `Watch` opens the SSE stream from 8.3, parses it line by line, remembers the last ID it saw, and when the connection drops it reconnects with `Last-Event-ID` so the caller misses nothing. When the caller breaks out of the loop or cancels `ctx`, the HTTP response is closed and no goroutine is left behind.
+Give `burrow.Client` a `Watch` method. The caller writes `for ev, err := range c.Watch(ctx, "user:", 0)` and gets events one at a time, as if looping over a slice. Underneath, `Watch` opens the SSE stream from 8.3, parses it line by line, remembers the last ID it saw, and when the connection drops it reconnects with `Last-Event-ID` so the caller misses nothing. If the server restarted in the meantime it can't replay, says `reset`, and the caller gets `watch.ErrReset` to handle. When the caller breaks out of the loop or cancels `ctx`, the HTTP response is closed and no goroutine is left behind.
 
 ## What you're using from before
 
-**Resumable stream (8.4 · Resume).** `GET /v1/watch?prefix=` with a `Last-Event-ID` header replays what the client missed, then goes live, and answers `event: reset` when the ID is too old. The client sends the header on every reconnect and treats `reset` as an error the caller must handle:
+**Resumable stream (8.4 · Resume).** `GET /v1/watch?prefix=` with a `Last-Event-ID` header replays what the client missed, then goes live, and answers `event: reset` when it can't resume from that ID: the ID is too old, or the server restarted since. The client sends the header on every reconnect and treats `reset` as an error the caller must handle:
 
 ```text
 GET /v1/watch?prefix=user:
@@ -65,7 +65,7 @@ Strip the field name and the single optional space after the colon. A `data` fie
 - `ctx` is cancelled: `resp.Body` reads fail. Yield `ctx.Err()` once, then return.
 - The connection drops for any other reason: do not yield anything. Close the body, wait `Backoff(attempt)` (watching `ctx`), reconnect with the last ID, keep going.
 
-A `reset` event means the server could not replay: yield `watch.ErrReset` once and return. The caller decides whether to re-list keys and start again from 0.
+A `reset` event means the server could not replay: yield `watch.ErrReset` once and return. The caller decides whether to re-list keys and start again from 0. A dropped connection to a server that is still running is invisible to the caller; a server restart is not, because the new process does not have the events the client missed.
 
 ## What to do
 
@@ -102,7 +102,7 @@ for ev, err := range c.Watch(ctx, "user:", 0) {
 }
 ```
 
-Drop the connection while this loop runs (a proxy restart, a flaky network, or `CloseClientConnections` in a test). The loop pauses, the client reconnects with `Last-Event-ID: 8`, the server replays what was missed, and the numbers continue without a gap:
+Drop the connection while this loop runs (a proxy restart, a flaky network, or `CloseClientConnections` in a test). The loop pauses, the client reconnects with `Last-Event-ID: 8`, the server replays what was missed, and the numbers continue without a gap (small IDs here to keep it readable; `burrowd`'s real IDs start at its boot-time start ID):
 
 ```text
 7 put user:3
@@ -112,9 +112,12 @@ Drop the connection while this loop runs (a proxy restart, a flaky network, or `
 10 delete user:3
 ```
 
+Restart the server instead and the reconnect gets `event: reset`: the loop prints `too far behind, re-list and start over` and stops.
+
 ## Done when
 
 - [ ] Events arrive in order across a server that closes all client connections mid-stream (`httptest.Server.CloseClientConnections`), with the client reconnecting on its own
+- [ ] After a server restart, the reconnect gets `reset` and the loop yields `watch.ErrReset` once and stops
 - [ ] `break` stops the iterator, the response body is closed and `testkit.NoLeaks` sees no goroutine left
 - [ ] Cancelling `ctx` ends the loop with one `context.Canceled` error
 - [ ] A `reset` event from the server is yielded as `watch.ErrReset`
@@ -146,11 +149,12 @@ var ErrReset = errors.New("watch: reset")
 
 > **Tests for this level aren't written yet.** Run `burrow prompt tests` and paste the result to Claude. It will write a hardened suite for this level into `curriculum/levels/8.5/files/`, matching the earlier chapters.
 
-Pass when: a consumer `for ev, err := range c.Watch(ctx, "user:", 0)` sees every write in order across a server restart, and breaking out of the loop closes the HTTP response and leaves no goroutine.
+Pass when: a consumer `for ev, err := range c.Watch(ctx, "user:", 0)` sees every write in order across a dropped connection, gets watch.ErrReset after a server restart, and breaking out of the loop closes the HTTP response and leaves no goroutine.
 
 The suite will cover:
 
-- Events in order across a forced server close/reopen (httptest.Server.CloseClientConnections)
+- Events in order across a dropped connection (httptest.Server.CloseClientConnections)
+- A restarted server (a new broker with a higher WithStartID behind the same URL) makes the loop yield watch.ErrReset once and stop
 - break stops the iterator and the response body is closed (testkit.NoLeaks)
 - ctx cancel ends the loop with context.Canceled
 - A reset event is surfaced as watch.ErrReset
@@ -164,7 +168,8 @@ go run ./cmd/burrowd serve -http 127.0.0.1:8080 &
 for i in 1 2 3; do
   curl -s -X PUT localhost:8080/v1/kv/user:$i -d v$i
 done
-kill %1; go run ./cmd/burrowd serve -http 127.0.0.1:8080 &  # reconnects
+kill %1; go run ./cmd/burrowd serve -http 127.0.0.1:8080 &
+# the loop reconnects, gets reset and prints the ErrReset line
 ```
 
 ## In the wild

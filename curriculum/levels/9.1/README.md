@@ -19,14 +19,15 @@ args := []string{"serve", "-id", n.ID, "-addr", n.Addr, "-http", n.HTTP,
 cmd := exec.CommandContext(ctx, "burrowd", args...)
 ```
 
-**Admin port (7.6 · Gauges).** Each node's `-admin` port serves `GET /readyz`, which is 503 until replay has finished and 200 after. "Ready" for devcluster means every node's `/readyz` returned 200. Give each node its own admin port and poll it.
-
-**HTTP client lib (7.5 · Client Library).** The readiness poll uses the configured `http.Client` from 7.5 (the one with timeouts and keep-alive set), not `http.DefaultClient`. Export a small constructor for it if you haven't already (the name is yours):
+**Admin port (7.6 · Gauges).** Each node's `-admin` port serves `GET /readyz`, which is 503 until replay has finished and 200 after. "Ready" for devcluster means every node's `/readyz` returned 200. Give each node its own admin port and poll it with a plain `http.Client` and a short timeout, so a node that accepts the connection but never answers can't stall the loop (`http.DefaultClient` has no timeout at all):
 
 ```go
-hc := burrow.NewHTTPClient() // the *http.Client that burrow.New builds
+hc := &http.Client{Timeout: 500 * time.Millisecond}
 resp, err := hc.Get("http://" + n.Admin + "/readyz")
 ready := err == nil && resp.StatusCode == 200
+if err == nil {
+	resp.Body.Close()
+}
 ```
 
 ## What's new here
@@ -53,7 +54,7 @@ go func() {
 }()
 ```
 
-**Config structs.** A node has seven or eight settings. Passing them as separate arguments is a mess; a `Node` struct with named fields is the Go way, and a function that computes the struct for node `i` from `-base-port` keeps the port scheme in one place:
+**Config structs.** A node has seven or eight settings. Passing them as separate arguments is a mess; a `Node` struct with named fields is the Go way, and a function that computes the struct for node `i` from `-base-port` and the data directory keeps the port scheme in one place:
 
 ```go
 type Node struct {
@@ -67,21 +68,38 @@ func node(i, base int, dir string) Node {
 		PeerAddr: fmt.Sprintf("127.0.0.1:%d", base+i),
 		Addr:     fmt.Sprintf("127.0.0.1:%d", base+100+i),
 		// ...
-		Data: filepath.Join(dir, id),
+		Data: filepath.Join(dir, fmt.Sprintf("node%d", i)),
 	}
 }
 ```
 
 The port scheme above is one that works; any scheme is fine as long as the nodes never collide and `-peers` lists the peer addresses.
 
+**Keeping data, or not.** By default a dev cluster should leave nothing behind, so each node gets a fresh directory from `os.MkdirTemp`, removed when devcluster exits. Later levels need the opposite: chapter 10 restarts the whole cluster and expects every node to find its log. `-data <dir>` gives node `i` the directory `<dir>/node<i>`, created if missing and kept on exit, so a second run with the same `-data` picks up where the first stopped:
+
+```go
+dir := *dataDir
+if dir == "" {
+	tmp, err := os.MkdirTemp("", "devcluster-*")
+	if err != nil {
+		fmt.Fprintln(stderr, "devcluster:", err)
+		return 1
+	}
+	defer os.RemoveAll(tmp) // after every node has been waited on
+	dir = tmp
+}
+```
+
+The `defer` runs when `run` returns, which is after the last `Wait`, so no node is still writing into the directory being removed.
+
 ## What to do
 
 1. In `burrowd serve`, add `-id`, `-peers` and `-peer-addr`. Parse `-peers` as `name=host:port` pairs separated by commas into a `map[string]string`. Store them on the server config; nothing uses them yet. Reject a `-peers` entry without `=` with a usage error.
-2. Create `cmd/devcluster/main.go` with `-n` (default 3) and `-base-port` (default 7000). Keep `main` to one line and the work in `run(args, stdout, stderr) int`, as in 0.1.
-3. Build the `[]Node` from `-n` and `-base-port`, with a temp directory (or `./data/<id>`) for each node's `-data`.
+2. Create `cmd/devcluster/main.go` with `-n` (default 3), `-base-port` (default 7000) and `-data` (default empty). Keep `main` to one line and the work in `run(args, stdout, stderr) int`, as in 0.1.
+3. Build the `[]Node` from `-n`, `-base-port` and the data directory. With `-data <dir>`, node `i` uses `<dir>/node<i>` (create it with `os.MkdirAll`) and nothing is removed on exit. Without it, use a temp directory and remove it, and everything in it, on exit.
 4. Make a context cancelled on `SIGINT` and `SIGTERM` with `signal.NotifyContext`.
 5. For each node: `exec.CommandContext` with that context, `Cancel` set to `SIGTERM`, `WaitDelay` set, both pipes drained by goroutines that prefix lines with `<id> | `, then `Start`.
-6. Poll every node's `/readyz` every 100 ms until all return 200, giving up with an error after 30 s. Then print `cluster ready`.
+6. Poll every node's `/readyz` every 100 ms with a plain `http.Client` that has a short `Timeout`, until all return 200, giving up with an error after 30 s. Then print `cluster ready`.
 7. Wait for the context to end, then `Wait` on every child. Exit 0 if the shutdown was from a signal.
    - If any node exits early on its own, treat it as a failure: cancel the context, wait for the rest, exit 1.
 8. Check with `pgrep burrowd` after Ctrl-C. Nothing should be left.
@@ -121,6 +139,7 @@ not found
 - [ ] The three nodes serve independent stores
 - [ ] Every log line from a node is prefixed with its ID
 - [ ] After SIGINT, devcluster exits and no `burrowd` process is left running
+- [ ] Without `-data`, no node directory is left after exit; with `-data ./data`, `./data/node1` to `./data/node3` are still there and a second run uses them again
 - [ ] `burrowd serve -id n1 -peers n1=127.0.0.1:7001,n2=... -peer-addr 127.0.0.1:7001` is accepted; a malformed `-peers` is a usage error
 
 ## Reference
@@ -132,18 +151,21 @@ not found
 //   -peer-addr 127.0.0.1:7001
 // Parsed and stored; nothing listens on -peer-addr until 9.2.
 
-// devcluster [-n 3] [-base-port 7000]
+// devcluster [-n 3] [-base-port 7000] [-data dir]
 //   starts n nodes, each with its own -data directory and ports
+//   -data dir: node i uses dir/node<i>, kept on exit
+//   no -data: each node gets a temp dir, removed on exit
 //   prefixes every stdout/stderr line with `n1 |`
-//   polls each node's /readyz with burrow's http client until all
-//   are ready
+//   polls each node's /readyz with a plain http.Client (short
+//   Timeout) until all are ready
 //   prints `cluster ready`
 //   stops all nodes on SIGINT and waits for them
 ```
 
 - Node flags on `burrowd serve`
 - `os/exec` with `StdoutPipe` and a prefixing scanner, one goroutine per pipe
-- Readiness polling on `/readyz`
+- Readiness polling on `/readyz` with a short-timeout `http.Client`
+- `-data <dir>` kept on exit; temp directories removed otherwise
 - Clean teardown: no child outlives devcluster
 
 ## The tests check
@@ -157,6 +179,7 @@ The suite will cover:
 - Three nodes become ready and serve independent stores
 - Killing devcluster with SIGINT leaves no child processes
 - Log lines are prefixed per node
+- Without -data no node directory remains after exit; with -data, dir/node1..dir/node3 remain and a second run reuses them
 
 ## Try it
 
@@ -166,6 +189,7 @@ go build -o burrowd ./cmd/burrowd
 go run ./cmd/devcluster
 # Ctrl-C, then:
 pgrep burrowd || echo clean
+go run ./cmd/devcluster -data ./data   # Ctrl-C; ./data/node1.. stay
 ```
 
 ## In the wild
@@ -176,4 +200,4 @@ goreman/foreman, docker compose, kind; the readiness loop is what Kubernetes doe
 
 os/exec · exec.CommandContext · pipes · config structs
 
-Standard library: `os/exec`, `flag`, `bufio`, `io`
+Standard library: `os/exec`, `flag`, `bufio`, `io`, `os`, `net/http`

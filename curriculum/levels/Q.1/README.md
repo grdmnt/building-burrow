@@ -74,7 +74,7 @@ type Message struct {
 
 1. Make a `queue` package with `Message` and `Broker` as in the Reference. `New(dir string)` opens one `wal.Log` per queue under `dir`, replaying any that exist.
 2. `Send`: validate the queue name (same rules as keys), lock the queue, assign the next sequence number and `EnqueuedTime`, append the message as a JSON record, then return the sequence number.
-3. `Receive`: lock the queue, take the oldest message, append a taken record with its sequence number, then return it. On an empty queue, return an error right away (waiting comes in a later level).
+3. `Receive`: lock the queue, take the oldest message, append a taken record with its sequence number, then return it. On an empty queue, return an error right away. `Receive` keeps this signature and this behaviour for good; waiting and batches come in Q.3 as a separate `ReceiveBatch`.
 4. Replay on `New`: for each log, add every sent message to the queue in order, remove every one named by a taken record, and set the counter to the largest sequence number seen.
 5. A `queue.Server` on `wire.ServeConns` that decodes the op byte and JSON, calls the broker and writes the reply, with the same `Shutdown(ctx)` as the frame server.
 6. A `queue.Client` with `Dial`, `Send`, `Receive` and `Close`.
@@ -134,7 +134,8 @@ type Message struct {
 }
 
 func (b *Broker) Send(ctx, queue string, m Message) (uint64, error)
-// receive-and-delete
+// receive-and-delete, one message, no waiting; unchanged in Q.2 and
+// Q.3
 func (b *Broker) Receive(ctx, queue string) (Message, error)
 ```
 
