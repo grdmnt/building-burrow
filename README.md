@@ -64,7 +64,7 @@ Your code goes at the repo root (`cmd/`, `store/`, `wire/`, `wal/`, `durable/`, 
 
 ## Rules
 
-- Standard library only in the code you build. Tool dependencies (the optional M.1 level adds staticcheck with `go get -tool`) never reach the binary, and the optional Q.4 level uses the Azure Service Bus SDK in its own module.
+- Standard library only in the code you build. Tool dependencies (the optional M.1 level adds staticcheck with `go get -tool`) never reach the binary. The two exceptions live in their own modules: the optional gRPC chapter (`grpc/`, with grpc-go and protobuf) and the optional Q.4 level (the Azure Service Bus SDK).
 - You write tests too. From 0.2 on, some levels grade your own tests by planting bugs in copies of your code (mutants) and checking your tests catch them.
 - You write all the implementation. Tests, hints and reviews come from the curriculum (and Claude).
 - Every test run uses `-race`.
@@ -92,8 +92,9 @@ The tree branches early. After Boot Sector you can take Memory or Codec; after b
 | M | Toolchain | 1 | optional: a `tool` directive for staticcheck, go.sum, `go mod tidy`, and proof the binary stays standard-library only |
 | H | HTTP Deep Cuts | 3 | optional: keep-alive, chunked streaming, hardening and conformance |
 | T | Traffic Control | 2 | optional: a token bucket, a generic LRU with single-flight |
+| G | gRPC | 6 | optional: protobuf's wire format by hand, then a .proto contract, a gRPC server with interceptors, a streaming watch, and a client that is itself a Store (its own module, `grpc/`) |
 | S | TLS & Auth | 3 | optional: TLS and HTTP/2 on the API, bearer tokens, mutual TLS between cluster peers |
 | D | Eventually Consistent | 3 | optional epilogue: a hash ring, quorum replication, and the checker catching it |
 | Q | Queues | 4 | optional: a durable queue broker, peek-lock, competing consumers, then the real Azure Service Bus |
 
-47 mandatory levels, 16 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts and Toolchain chapters have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).
+47 mandatory levels, 22 optional. Levels 0.1 to 7.2 and the optional HTTP Deep Cuts, Toolchain and gRPC chapters have full test suites. Later chapters have specs and hints; their tests get written as you reach them (`burrow prompt tests`).

@@ -32,7 +32,7 @@ var (
 		{"9", "cluster"}, {"10", "raft"}, {"11", "chaos"},
 	}}
 	addOns = []machineRow{
-		{"M", "toolchain"}, {"H", "deep cuts"}, {"T", "traffic"}, {"S", "tls"}, {"D", "dynamo"}, {"Q", "queues"},
+		{"M", "toolchain"}, {"H", "deep cuts"}, {"T", "traffic"}, {"G", "gRPC"}, {"S", "tls"}, {"D", "dynamo"}, {"Q", "queues"},
 	}
 )
 
@@ -64,9 +64,20 @@ func (w *world) drawLamps(cv *tui.Canvas, x, y int, ch *Chapter, a machineAnim) 
 	return len(ch.Levels)
 }
 
+// present keeps the rows whose chapter exists in this curriculum.
+func (w *world) present(rows []machineRow) []machineRow {
+	var out []machineRow
+	for _, r := range rows {
+		if w.cur.byKey[r.key] != nil {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func (w *world) blockInk(rows []machineRow, a machineAnim) tui.Ink {
 	all, any, cur := true, false, false
-	for _, r := range rows {
+	for _, r := range w.present(rows) {
 		ch := w.cur.byKey[r.key]
 		for _, l := range ch.Levels {
 			done := w.levelDone(l) || l.ID == a.part
@@ -89,7 +100,7 @@ func (w *world) blockInk(rows []machineRow, a machineAnim) tui.Ink {
 }
 
 func (w *world) anyBuilt(rows []machineRow, a machineAnim) bool {
-	for _, r := range rows {
+	for _, r := range w.present(rows) {
 		for _, l := range w.cur.byKey[r.key].Levels {
 			if w.levelDone(l) || l.ID == a.part {
 				return true
@@ -131,7 +142,8 @@ func machineLines(w *world, width int, a machineAnim) []string {
 	clusterY := max(frontY+frontH, clientY+3) + 2
 	clusterH := 3
 	addY := max(clusterY+clusterH, diskY+diskH) + addGap
-	addRows := 2
+	adds := w.present(addOns)
+	addRows := (len(adds) + 2) / 3
 	cv := tui.NewCanvas(machineWidth, addY+addRows+2)
 
 	lit := func(on bool) tui.Ink {
@@ -175,7 +187,7 @@ func machineLines(w *world, width int, a machineAnim) []string {
 
 	// Optional add-ons, two rows of three.
 	cv.Box(clientX, addY, machineWidth, addRows+2, tui.Rounded, w.blockInk(addOns, a), "ADD-ONS · optional", tui.InkGray)
-	for i, r := range addOns {
+	for i, r := range adds {
 		ch := w.cur.byKey[r.key]
 		px := clientX + 2 + (i%3)*22
 		py := addY + 1 + i/3

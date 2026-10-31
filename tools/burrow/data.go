@@ -45,6 +45,7 @@ type Level struct {
 	Difficulty int      `json:"difficulty"`
 	Consumes   []string `json:"consumes"`
 	Wild       string   `json:"wild"`
+	Module     string   `json:"module,omitempty"` // nested module the level's code lives in, e.g. "grpc"
 
 	ch  *Chapter
 	idx int

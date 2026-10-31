@@ -27,7 +27,7 @@ func cmdPrompt(w *world, args []string) error {
 	case "tests":
 		fmt.Fprintf(&b, "%s\n\n", head)
 		b.WriteString("Write the hidden test suite for this level of my Building Burrow repo. I code the implementation by hand; you write tests only, never implementation.\n\n")
-		b.WriteString("Conventions (match the existing suites in curriculum/levels/0.1 to 7.2, H.1 to H.3 and M.1):\n")
+		b.WriteString("Conventions (match the existing suites in curriculum/levels/0.1 to 7.2, H.1 to H.3, M.1 and G.1 to G.6):\n")
 		fmt.Fprintf(&b, "- Put test files in curriculum/levels/%s/files/<package dir>/l%s_<topic>_test.go, mirroring where they'll be installed in the repo.\n", l.ID, strings.ToLower(strings.ReplaceAll(l.ID, ".", "_")))
 		fmt.Fprintf(&b, "- Every test function is named Test%s<Name> (or Fuzz%s<Name>) so `burrow test` can select it.\n", testPrefix(l), testPrefix(l))
 		b.WriteString("- Standard library only. Use burrow/internal/testkit (Eventually, Within, NoLeaks, FakeClock, Listen, RequireRace).\n")

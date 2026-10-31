@@ -2,7 +2,7 @@
   "title": "Building Burrow",
   "go": "1.24",
   "rules": [
-    "Standard library only in everything that builds: tool directives (M.1) may require modules that never reach any package's import graph, and the single real exception is Q.4 (marked sdk: true, in its own module).",
+    "Standard library only in everything that builds: tool directives (M.1) may require modules that never reach any package's import graph. The exceptions live in their own modules: chapter G's grpc/ (grpc-go and protobuf, levels marked module: grpc) and Q.4 (sdk: true).",
     "Every test run uses -race.",
     "Each level produces exactly one part; parts are consumed by later levels (see check_graph.py).",
     "Go 1.24 minimum. Time-based suites use an injectable clock (store.WithClock + testkit.FakeClock), never testing/synctest."
@@ -2276,6 +2276,281 @@
             "Rate limiter"
           ],
           "wild": "golang.org/x/sync/singleflight, hashicorp/golang-lru, groupcache"
+        }
+      ]
+    },
+    {
+      "key": "G",
+      "name": "gRPC",
+      "optional": true,
+      "needs": [
+        "7",
+        "8",
+        "M"
+      ],
+      "line": "Optional. Protobuf by hand, then the real thing: a .proto contract, a gRPC server, interceptors, a streaming watch and a client that is itself a Store",
+      "pos": {
+        "row": 6,
+        "col": 3,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "G.1",
+          "title": "Wire Format",
+          "brief": "Protobuf by hand: varints, tags and lengths for Entry and Event, byte for byte what protoc's code writes, plus gRPC's 5-byte message frame.",
+          "build": [
+            "`AppendVarint` and `ConsumeVarint`, refusing truncated and overlong varints",
+            "`MarshalEntry`/`UnmarshalEntry` and `MarshalEvent`/`UnmarshalEvent` for burrow.v1.Entry and burrow.v1.Event, with the EventType enum",
+            "Skipping unknown fields of every wire type, groups included",
+            "`WriteGRPCMessage`/`ReadGRPCMessage` with `ErrTooLarge` before allocating and `ErrCompressed`"
+          ],
+          "win": "Every Entry and Event encodes to exactly the bytes google.golang.org/protobuf writes, unknown fields of every wire type are skipped, malformed input is the right error and never a panic, gRPC frames follow the Record codec's EOF and size rules, and the fuzzer finds nothing.",
+          "go": [
+            "bit operators (&, |, <<, >>)",
+            "varint loops",
+            "uint64/int64 two's complement conversions",
+            "decoding into a pointer to merge",
+            "recursion for nested groups",
+            "time.Unix(0, ns) and UnixNano",
+            "encoding/hex for test fixtures",
+            "fuzz targets with several arguments"
+          ],
+          "pkgs": [
+            "encoding/binary",
+            "io",
+            "bytes",
+            "errors",
+            "time",
+            "encoding/hex",
+            "testing"
+          ],
+          "hints": [
+            "A tag is a varint: field number = v >> 3, wire type = v & 7. Write one loop that reads a tag, handles the fields you know, and calls skipField for the rest.",
+            "ConsumeVarint: v |= uint64(c&0x7f) << (7*i) for i up to 9, stop at the first byte below 0x80; the 10th byte must be 0 or 1. Decode a nested Entry from exactly its own LEN bytes, into &ev.Entry so repeated entries merge.",
+            "Marshal appends only non-zero fields in number order (0x0a key, 0x12 value, 0x18 version, 0x20 uint64(UnixNano)). ReadGRPCMessage: io.ReadFull into a [5]byte, flag != 0 is ErrCompressed, length > max is ErrTooLarge, then make and ReadFull."
+          ],
+          "unlock": "Protobuf codec",
+          "idea": "Hand-written protobuf encoding (varints, tags, wire types, proto3 zero omission, unknown-field skipping) checked against real protobuf bytes, inside gRPC's length-prefixed frame",
+          "difficulty": 3,
+          "consumes": [
+            "Record codec",
+            "KV Frame",
+            "Broker"
+          ],
+          "wild": "google.golang.org/protobuf/encoding/protowire is this level as a library; gRPC over HTTP/2 frames every message with the same 5-byte prefix; Kafka, SQLite and Go's encoding/binary.Uvarint use varints too"
+        },
+        {
+          "id": "G.2",
+          "title": "Contract",
+          "brief": "kv.proto, buf and the protoc plugins as go tool deps: Burrow's gRPC contract in its own module.",
+          "build": [
+            "`grpc/go.mod`: `module burrow/grpc`, `replace burrow => ../`, `tool` lines for protoc-gen-go and protoc-gen-go-grpc",
+            "`grpc/proto/burrow/v1/kv.proto`: Entry, EventType, Event, the requests and the `KV` service",
+            "`buf.yaml`, `buf.gen.yaml` and the committed `burrowpb` package"
+          ],
+          "win": "proto.Marshal of the generated Entry and Event gives exactly pbwire's bytes, and the generated headers name the plugin versions grpc/go.mod pins.",
+          "go": [
+            "a second module with replace",
+            "pinning a dependency to your Go version",
+            "proto3 syntax",
+            "optional and explicit presence",
+            "go tool plugins in buf.gen.yaml",
+            "generated code with DO NOT EDIT",
+            "protoreflect descriptors"
+          ],
+          "pkgs": [
+            "google.golang.org/protobuf/proto",
+            "google.golang.org/protobuf/reflect/protoreflect",
+            "google.golang.org/grpc"
+          ],
+          "hints": [
+            "Make proto/ the buf module root (buf.yaml: modules: - path: proto) so the file registers as burrow/v1/kv.proto, and give Entry and Event exactly G.1's field numbers and EVENT_TYPE_* names.",
+            "`optional uint64 if_version = 3;` makes a *uint64: unset means unconditional, a set 0 means create only. Only if_version (Put and Delete) and WatchRequest.after are optional.",
+            "Run both plugins as `local: [\"go\", \"tool\", \"protoc-gen-go\"]` (and protoc-gen-go-grpc) with `opt: module=burrow/grpc` and `out: .`, then `buf generate` in grpc/ and `go mod tidy`; a plugin from PATH fails the version check."
+          ],
+          "unlock": "Service contract",
+          "idea": "A schema both sides compile from: proto3, explicit presence with optional, generated code pinned by go tool",
+          "difficulty": 2,
+          "consumes": [
+            "Protobuf codec",
+            "Tool directive"
+          ],
+          "wild": "Every gRPC API is a .proto first: googleapis, etcd's rpc.proto, Kubernetes' CRI; buf lints, checks breaking changes and generates for most teams",
+          "module": "grpc"
+        },
+        {
+          "id": "G.3",
+          "title": "Front Panel",
+          "brief": "The KV service over any store.Store: status codes with ErrorInfo, client deadlines, a size limit, health, reflection and a burrow-grpc binary.",
+          "build": [
+            "`kvserver.Server` embedding `UnimplementedKVServer`: Get, Put, Delete, Touch, Keys",
+            "`toStatus`: sentinel to code plus `errdetails.ErrorInfo`",
+            "`GRPCServer()` with MaxRecvMsgSize, health and reflection",
+            "`cmd/burrow-grpc` (`-mem` or the frame client)"
+          ],
+          "win": "Every store error arrives with the right code and reason, a store that blocks gives DeadlineExceeded, a 2 MiB request is ResourceExhausted, and grpcurl lists the services on burrow-grpc.",
+          "go": [
+            "implementing a generated interface",
+            "embedding UnimplementedServer",
+            "grpc.NewServer, Register, Serve",
+            "status and codes",
+            "error details with ErrorInfo",
+            "deadlines as the handler's ctx",
+            "status.FromContextError",
+            "health and reflection",
+            "bufconn"
+          ],
+          "pkgs": [
+            "google.golang.org/grpc",
+            "google.golang.org/grpc/status",
+            "google.golang.org/grpc/codes",
+            "google.golang.org/grpc/health",
+            "google.golang.org/grpc/reflection",
+            "google.golang.org/genproto/googleapis/rpc/errdetails"
+          ],
+          "hints": [
+            "Write toStatus(err, conditional) once with errors.Is; conditional is req.IfVersion != nil, so ErrNotFound becomes Aborted only for conditional writes.",
+            "Attach the reason with status.New(code, msg).WithDetails(&errdetails.ErrorInfo{Reason: \"NOT_FOUND\", Domain: \"burrow.v1\"}) and return st.Err().",
+            "Pass the handler's ctx to every store call, and set grpc.MaxRecvMsgSize(1<<20 + 64<<10) in GRPCServer before the caller's opts; GRPCServer must not call Serve."
+          ],
+          "unlock": "gRPC API",
+          "idea": "gRPC's error model: mapping sentinels to status codes and machine-readable reasons, with the client's deadline arriving as the handler's ctx",
+          "difficulty": 3,
+          "consumes": [
+            "Service contract",
+            "Memory store",
+            "CAS",
+            "Expiry",
+            "Deadline guard"
+          ],
+          "wild": "etcd's v3 KV API; Google's AIP-193 ErrorInfo on every error; grpc-gateway and Envoy transcoding HTTP in front of gRPC services",
+          "module": "grpc"
+        },
+        {
+          "id": "G.4",
+          "title": "Signal Chain",
+          "brief": "Request IDs, an access log and panic recovery as unary and stream interceptors.",
+          "build": [
+            "`UnaryRequestID`/`StreamRequestID`, `RequestIDFrom`",
+            "`UnaryAccessLog`/`StreamAccessLog` (one JSON \"rpc\" line, streams count `sent`)",
+            "`UnaryRecover`/`StreamRecover`",
+            "A ServerStream wrapper overriding Context and SendMsg"
+          ],
+          "win": "Every call's trailers carry x-request-id, every call logs one JSON line with id, method, code and duration, and a panicking handler gives Internal while the server keeps serving.",
+          "go": [
+            "unary and stream interceptors",
+            "grpc.ChainUnaryInterceptor",
+            "metadata: incoming, headers and trailers",
+            "committed calls and retries",
+            "wrapping grpc.ServerStream by embedding",
+            "named results changed by a deferred recover"
+          ],
+          "pkgs": [
+            "google.golang.org/grpc/metadata",
+            "log/slog",
+            "crypto/rand",
+            "encoding/hex",
+            "runtime/debug"
+          ],
+          "hints": [
+            "Echo the ID with grpc.SetTrailer (ss.SetTrailer for streams), not SetHeader: a response that sent headers is committed and can't be retried.",
+            "For streams, embed grpc.ServerStream in your own struct and override Context() to return the context with the ID, and SendMsg to count.",
+            "Install grpc.ChainUnaryInterceptor(UnaryRecover(l), UnaryRequestID(), UnaryAccessLog(l)) and the stream chain in the same order; Recover needs a named error result to replace the panic."
+          ],
+          "unlock": "Interceptors",
+          "idea": "Interceptors: 7.3's middleware for gRPC, metadata trailers, and wrapping grpc.ServerStream by embedding",
+          "difficulty": 3,
+          "consumes": [
+            "gRPC API",
+            "Middleware chain"
+          ],
+          "wild": "go-grpc-middleware's logging and recovery interceptors; OpenTelemetry's gRPC instrumentation; x-request-id in Envoy and most load balancers",
+          "module": "grpc"
+        },
+        {
+          "id": "G.5",
+          "title": "Event Stream",
+          "brief": "Server-streaming Watch: READY, resume from an ID, replay-to-live handover and clean cancellation.",
+          "build": [
+            "`kvserver.Broker` interface and `Server.Broker`",
+            "`Watch`: Subscribe or SubscribeFrom, READY, the forwarding loop",
+            "OutOfRange/CANNOT_RESUME, Unavailable when dropped",
+            "Keepalive in GRPCServer; burrow-grpc -mem wires the broker"
+          ],
+          "win": "A client that reconnects 100 times with its last ID under a running writer sees contiguous IDs, and every cancelled stream leaves no subscription behind.",
+          "go": [
+            "server-streaming handlers",
+            "grpc.ServerStreamingServer[T]",
+            "Send and flow control",
+            "stream.Context() for cancellation",
+            "ending a stream with a status",
+            "keepalive instead of heartbeats",
+            "accepting an interface for a dependency"
+          ],
+          "pkgs": [
+            "google.golang.org/grpc",
+            "google.golang.org/grpc/keepalive",
+            "context"
+          ],
+          "hints": [
+            "req.After == nil means Subscribe and READY with last; a set after, even 0, means SubscribeFrom and READY with after.",
+            "defer stop() right after subscribing, then select on stream.Context().Done() and the channel; a closed channel is codes.Unavailable.",
+            "Map watch.ErrCannotResume through toStatus to OutOfRange with reason CANNOT_RESUME, and make sure a refused resume subscribes nothing."
+          ],
+          "unlock": "gRPC Watch",
+          "idea": "A server-streaming RPC as the event stream, with optional presence picking live vs resume and the stream's context ending it",
+          "difficulty": 3,
+          "consumes": [
+            "Interceptors",
+            "Broker",
+            "Resumable stream"
+          ],
+          "wild": "etcd's Watch with revisions and ErrCompacted; Kubernetes watches resuming by resourceVersion with 410 Gone; Pub/Sub StreamingPull",
+          "module": "grpc"
+        },
+        {
+          "id": "G.6",
+          "title": "Client Library",
+          "brief": "kvclient: a store.Store over gRPC with inverse error mapping, a retrying service config, waitForReady and a resuming Watch iterator.",
+          "build": [
+            "`Dial` with `ServiceConfig` (retryPolicy for Get/Keys/Touch, waitForReady)",
+            "The nine store.Store methods with `mapErr`",
+            "`Watch(ctx, prefix, afterID) iter.Seq2[watch.Event, error]` with resume"
+          ],
+          "win": "storetest's four suites pass over gRPC, errors.Is and status.Code both work on every error, and a Watch carries on across a server restart with no gaps or duplicates.",
+          "go": [
+            "grpc.NewClient and lazy connections",
+            "one shared ClientConn",
+            "wrapping with two %w verbs",
+            "status.FromError through errors.As",
+            "reading error details",
+            "service config: retryPolicy and waitForReady",
+            "a resuming stream as iter.Seq2"
+          ],
+          "pkgs": [
+            "google.golang.org/grpc",
+            "google.golang.org/grpc/status",
+            "google.golang.org/genproto/googleapis/rpc/errdetails",
+            "iter",
+            "math/rand/v2"
+          ],
+          "hints": [
+            "Map by ErrorInfo reason first (CAS on a missing key is Aborted but must be ErrNotFound), then by code for Canceled and DeadlineExceeded, and return fmt.Errorf(\"%w: %w\", sentinel, err).",
+            "Retry only Get, Keys and Touch on UNAVAILABLE, and give that methodConfig entry its own waitForReady: the most specific name wins.",
+            "In Watch, set last and seen on every message including READY; on UNAVAILABLE back off and resume with After: proto.Uint64(last) whenever seen, even if last is 0."
+          ],
+          "unlock": "gRPC client",
+          "idea": "A client that is itself a Store over gRPC: status back to sentinels with two %w verbs, service-config retries, and iter.Seq2 with auto-resume",
+          "difficulty": 4,
+          "consumes": [
+            "gRPC Watch",
+            "gRPC API",
+            "Interceptors",
+            "Watch client"
+          ],
+          "wild": "etcd's clientv3; Google Cloud client libraries' retry service configs; Spanner and Bigtable clients waiting for ready",
+          "module": "grpc"
         }
       ]
     },

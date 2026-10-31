@@ -88,15 +88,68 @@ type runOpts struct {
 	verbose bool
 }
 
-// runTests runs the tests for the given levels and renders them live.
+func newSummary() *runSummary {
+	return &runSummary{buildOutput: map[string][]string{}, pkgOutput: map[string][]string{}, pkgFailed: map[string]bool{}}
+}
+
+// runTests runs the tests for the given levels and renders them live. Levels
+// in a nested module (chapter G's grpc/) run with that module as the working
+// directory, one go test per module.
 func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
-	sum := &runSummary{buildOutput: map[string][]string{}, pkgOutput: map[string][]string{}, pkgFailed: map[string]bool{}}
+	var modules []string
+	byModule := map[string][]*Level{}
+	for _, l := range o.levels {
+		if _, ok := byModule[l.Module]; !ok {
+			modules = append(modules, l.Module)
+		}
+		byModule[l.Module] = append(byModule[l.Module], l)
+	}
+	if len(modules) == 1 {
+		return runModuleTests(ctx, w, o, modules[0], byModule[modules[0]])
+	}
+	sum := newSummary()
+	for _, m := range modules {
+		s := runModuleTests(ctx, w, o, m, byModule[m])
+		sum.merge(s)
+		if s.cancelled {
+			break
+		}
+	}
+	return sum
+}
+
+func (s *runSummary) merge(o *runSummary) {
+	s.pass += o.pass
+	s.fail += o.fail
+	s.skip += o.skip
+	s.buildFailed = s.buildFailed || o.buildFailed
+	s.cancelled = s.cancelled || o.cancelled
+	s.raceOff = s.raceOff || o.raceOff
+	s.elapsed += o.elapsed
+	s.results = append(s.results, o.results...)
+	for k, v := range o.buildOutput {
+		s.buildOutput[k] = append(s.buildOutput[k], v...)
+	}
+	for k, v := range o.pkgOutput {
+		s.pkgOutput[k] = append(s.pkgOutput[k], v...)
+	}
+	for k, v := range o.pkgFailed {
+		s.pkgFailed[k] = s.pkgFailed[k] || v
+	}
+}
+
+func runModuleTests(ctx context.Context, w *world, o runOpts, module string, levels []*Level) *runSummary {
+	sum := newSummary()
+	dir := filepath.Join(w.cur.root, filepath.FromSlash(module))
 	var pkgs []string
 	seen := map[string]bool{}
 	var prefixes []string
-	for _, l := range o.levels {
+	for _, l := range levels {
 		prefixes = append(prefixes, testPrefix(l))
 		for _, p := range w.cur.packages(l) {
+			if module != "" {
+				p = "./" + strings.TrimPrefix(strings.TrimPrefix(p, "./"), module+"/")
+			}
 			if !seen[p] {
 				seen[p] = true
 				pkgs = append(pkgs, p)
@@ -106,6 +159,14 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 	if len(pkgs) == 0 {
 		fmt.Println(yellow("  No tests for this level yet.") + " Run " + bold("burrow prompt tests") + " and paste it to Claude.")
 		return sum
+	}
+	if module != "" {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+			fmt.Println(yellow("  No "+module+"/go.mod yet.") + gray(" This level's code lives in its own module: create it as the level's page describes."))
+			sum.buildFailed = true
+			sum.buildOutput[module] = []string{"no go.mod in " + module + "/\n"}
+			return sum
+		}
 	}
 	pattern := "^(Test|Fuzz)(" + strings.Join(prefixes, "|") + ")"
 	args := []string{"test", "-json", "-count=1", "-timeout=180s"}
@@ -118,7 +179,7 @@ func runTests(ctx context.Context, w *world, o runOpts) *runSummary {
 	args = append(args, pkgs...)
 
 	cmd := exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = w.cur.root
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=")
 	stdout, _ := cmd.StdoutPipe()
 	var stderr bytes.Buffer
