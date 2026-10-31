@@ -212,7 +212,12 @@ func (c *countingReader) Read(p []byte) (int, error) {
 }
 ```
 
-**19. rot13.** rot13 is the oldest joke in cryptography: replace every letter with the one 13 places later, wrapping round from `z` to `a` (`a` becomes `n`, `n` becomes `a`). Because the alphabet has 26 letters, doing it twice gives back the original, so encoding and decoding are the same operation. A `byte` is a number, so `'a' + (b-'a'+13)%26` style arithmetic works on letters; `%` is the remainder. Leave everything that isn't `a`-`z` or `A`-`Z` alone.
+**19. rot13.** rot13 is the oldest joke in cryptography: replace every letter with the one 13 places later, wrapping round from `z` to `a` (`a` becomes `n`, `n` becomes `a`). Because the alphabet has 26 letters, doing it twice gives back the original, so encoding and decoding are the same operation. A `byte` is a number and a character literal like `'a'` is too, so letters can be shifted with arithmetic: `'a' + 2` is `'c'`, and `b - 'a'` is a letter's position in the alphabet, 0 to 25. The remainder operator `%` is how you wrap round (`27 % 26` is 1). Leave everything that isn't `a`-`z` or `A`-`Z` alone.
+
+```go
+var b byte = 'h'
+fmt.Println(b-'a', string(rune(b+1))) // 7 i
+```
 
 ## What to do
 
