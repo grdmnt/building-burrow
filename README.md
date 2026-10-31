@@ -15,6 +15,8 @@ cd building-burrow
 ./burrow next     # start level 0.1
 ```
 
+Colours adapt to light and dark terminals automatically. If yours guesses wrong, set `BURROW_THEME=light` (or `dark`) in your shell profile.
+
 Optional: `alias burrow="$PWD/burrow"` in your shell profile so you can type `burrow` from any folder in the repo.
 
 ## The loop

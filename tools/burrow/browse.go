@@ -232,9 +232,9 @@ func (m *browseModel) listLines(h int) []string {
 		row := " " + lamp + " " + text
 		if i == m.sel {
 			selRow = len(rows)
-			st := lipgloss.NewStyle().Foreground(lipgloss.Color("16")).Background(tui.Cyan).Bold(true)
+			st := lipgloss.NewStyle().Foreground(tui.OnAccent.Color()).Background(tui.Cyan.Color()).Bold(true)
 			if m.onPage {
-				st = lipgloss.NewStyle().Foreground(tui.Cyan).Bold(true)
+				st = lipgloss.NewStyle().Foreground(tui.Cyan.Color()).Bold(true)
 			}
 			row = " " + lamp + " " + st.Render(" "+text+" ")
 		} else if m.w.levelState(l) == stLocked {
@@ -255,7 +255,7 @@ func (m *browseModel) View() string {
 	var tb []string
 	for i, t := range tabs {
 		if browseTab(i) == m.tab {
-			tb = append(tb, lipgloss.NewStyle().Foreground(tui.Cyan).Bold(true).Underline(true).Render(t))
+			tb = append(tb, lipgloss.NewStyle().Foreground(tui.Cyan.Color()).Bold(true).Underline(true).Render(t))
 		} else {
 			tb = append(tb, gray(t))
 		}
@@ -270,9 +270,9 @@ func (m *browseModel) View() string {
 			listBorder, pageBorder = tui.Faint, tui.Cyan
 		}
 		list := lipgloss.NewStyle().Width(listW-2).Height(bodyH).
-			Border(lipgloss.RoundedBorder(), false, true, false, false).BorderForeground(listBorder).
+			Border(lipgloss.RoundedBorder(), false, true, false, false).BorderForeground(listBorder.Color()).
 			Render(strings.Join(m.listLines(bodyH), "\n"))
-		page := lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), false, false, false, false).BorderForeground(pageBorder).
+		page := lipgloss.NewStyle().Border(lipgloss.RoundedBorder(), false, false, false, false).BorderForeground(pageBorder.Color()).
 			Render(m.page.View())
 		body = lipgloss.JoinHorizontal(lipgloss.Top, list, " ", page)
 	} else {

@@ -4,26 +4,83 @@
 // interactive views.
 package tui
 
-import "github.com/charmbracelet/lipgloss"
-
-// The palette. Everything the CLI draws uses these, so the look stays consistent.
-var (
-	Cyan    = lipgloss.Color("80")
-	Green   = lipgloss.Color("114")
-	Red     = lipgloss.Color("203")
-	Amber   = lipgloss.Color("215")
-	Yellow  = lipgloss.Color("221")
-	Magenta = lipgloss.Color("176")
-	Blue    = lipgloss.Color("75")
-	Gray    = lipgloss.Color("244")
-	Faint   = lipgloss.Color("239")
-	White   = lipgloss.Color("252")
+import (
+	"github.com/charmbracelet/lipgloss"
 )
+
+// Role names what a colour is for. Each role has one colour on dark
+// terminals and another on light ones, so everything drawn with roles stays
+// readable on both.
+type Role uint8
+
+const (
+	NoColor  Role = iota
+	Cyan          // accent: current level, selection, headings
+	Green         // done, passing
+	Red           // failing
+	Amber         // parts, optional chapters
+	Yellow        // inline code, highlights
+	Magenta       // Go keywords
+	Blue          // links
+	Gray          // secondary text
+	Faint         // borders, wires, locked things
+	White         // emphasised text
+	AmberDim      // locked optional chapters
+	OnAccent      // text drawn on a Cyan background
+	numRoles
+)
+
+// 256-colour palette entries for each role.
+type palette [numRoles]string
+
+var (
+	darkPalette = palette{
+		Cyan: "80", Green: "114", Red: "203", Amber: "215", Yellow: "221", Magenta: "176",
+		Blue: "75", Gray: "244", Faint: "239", White: "252", AmberDim: "137", OnAccent: "16",
+	}
+	lightPalette = palette{
+		Cyan: "30", Green: "28", Red: "160", Amber: "166", Yellow: "130", Magenta: "90",
+		Blue: "25", Gray: "242", Faint: "250", White: "235", AmberDim: "180", OnAccent: "231",
+	}
+	current = &darkPalette
+	light   bool
+)
+
+// SetLight switches every role to the palette for a light (true) or dark
+// (false) terminal background.
+func SetLight(on bool) {
+	light = on
+	current = &darkPalette
+	if on {
+		current = &lightPalette
+	}
+	// Tell Lip Gloss too, so it never queries the terminal itself.
+	lipgloss.SetHasDarkBackground(!on)
+}
+
+// Light reports whether the light palette is in use.
+func Light() bool { return light }
+
+// Color is the role's Lip Gloss colour in the current palette.
+func (r Role) Color() lipgloss.Color {
+	if r == NoColor {
+		return lipgloss.Color("")
+	}
+	return lipgloss.Color(current[r])
+}
+
+// Code is the role's ANSI SGR parameters, such as "38;5;80".
+func (r Role) Code() string {
+	if r == NoColor {
+		return "39"
+	}
+	return "38;5;" + current[r]
+}
 
 // Ink is how one cell is drawn. It's comparable, so runs of equal ink can be
 // rendered together.
 type Ink struct {
-	Color  lipgloss.Color
+	Color  Role
 	Bold   bool
 	Italic bool
 }
@@ -31,8 +88,8 @@ type Ink struct {
 // Style returns the Lip Gloss style for an ink.
 func (i Ink) Style() lipgloss.Style {
 	s := lipgloss.NewStyle()
-	if i.Color != "" {
-		s = s.Foreground(i.Color)
+	if i.Color != NoColor {
+		s = s.Foreground(i.Color.Color())
 	}
 	return s.Bold(i.Bold).Italic(i.Italic)
 }
@@ -62,11 +119,7 @@ var (
 func (i Ink) WithBold() Ink { i.Bold = true; return i }
 
 func init() {
-	// Burrow's palette is fixed, so there's no need to ask the terminal for
-	// its background colour. Asking writes an escape query and waits for the
-	// answer, which some terminals never send.
-	lipgloss.SetHasDarkBackground(true)
+	// Until the background is known, assume dark, and stop Lip Gloss from
+	// asking the terminal on its own: an unanswered query can hang.
+	SetLight(false)
 }
-
-// Color is a 256-colour palette entry, for the odd colour outside the palette.
-func Color(code string) lipgloss.Color { return lipgloss.Color(code) }

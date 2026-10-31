@@ -2,6 +2,7 @@
 package main
 
 import (
+	"burrowtool/tui"
 	"context"
 	"errors"
 	"fmt"
@@ -34,6 +35,9 @@ const helpText = `burrow · learn Go by building a distributed key-value store
   burrow prompt <tests|hint|review>   copy a prompt for Claude (tests for unwritten levels,
                                       a nudge with your code and failures, or a code review)
   burrow restore [level]  put back a level's test files if you changed them
+
+  Colours follow your terminal's background. To force them, set
+  BURROW_THEME=light or BURROW_THEME=dark.
 `
 
 func main() {
@@ -45,6 +49,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if useColor {
+		tui.SetLight(tui.DetectLight())
+	}
 	cmd := ""
 	if len(args) > 0 {
 		cmd, args = args[0], args[1:]

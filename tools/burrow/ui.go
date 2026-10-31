@@ -1,6 +1,7 @@
 package main
 
 import (
+	"burrowtool/tui"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,15 +61,15 @@ func paint(code, s string) string {
 func bold(s string) string    { return paint("1", s) }
 func dim(s string) string     { return paint("2", s) }
 func italic(s string) string  { return paint("3", s) }
-func red(s string) string     { return paint("38;5;203", s) }
-func green(s string) string   { return paint("38;5;114", s) }
-func yellow(s string) string  { return paint("38;5;221", s) }
-func amber(s string) string   { return paint("38;5;215", s) }
-func cyan(s string) string    { return paint("38;5;80", s) }
-func blue(s string) string    { return paint("38;5;75", s) }
-func magenta(s string) string { return paint("38;5;176", s) }
-func gray(s string) string    { return paint("38;5;244", s) }
-func faint(s string) string   { return paint("38;5;239", s) }
+func red(s string) string     { return paint(tui.Red.Code(), s) }
+func green(s string) string   { return paint(tui.Green.Code(), s) }
+func yellow(s string) string  { return paint(tui.Yellow.Code(), s) }
+func amber(s string) string   { return paint(tui.Amber.Code(), s) }
+func cyan(s string) string    { return paint(tui.Cyan.Code(), s) }
+func blue(s string) string    { return paint(tui.Blue.Code(), s) }
+func magenta(s string) string { return paint(tui.Magenta.Code(), s) }
+func gray(s string) string    { return paint(tui.Gray.Code(), s) }
+func faint(s string) string   { return paint(tui.Faint.Code(), s) }
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 

@@ -79,7 +79,7 @@ func mapString(w *world) string {
 		if ch.Optional && s != stDone {
 			edge = tui.InkAmber
 			if s == stLocked {
-				edge = tui.Ink{Color: tui.Color("137")}
+				edge = tui.Ink{Color: tui.AmberDim}
 			}
 		}
 		n := 0
