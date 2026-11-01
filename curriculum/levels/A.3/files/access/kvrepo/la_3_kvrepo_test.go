@@ -18,7 +18,7 @@ import (
 	"burrow/access/accesstest"
 	"burrow/access/kvrepo"
 	"burrow/api"
-	"burrow/burrow"
+	"burrow/sdk/burrow"
 	"burrow/store"
 )
 

@@ -43,7 +43,7 @@ var importRules = []importRule{
 	{"access/httpapi", map[string]string{
 		"burrow/access/kvrepo": "Handlers call the Service through its port; only " +
 			"cmd/accessd decides which TeamStore is real. Build it in main and pass it in.",
-		"burrow/burrow": "Handlers call the Service, never Burrow. The Burrow client is " +
+		"burrow/sdk/burrow": "Handlers call the Service, never Burrow. The Burrow client is " +
 			"kvrepo's transport, and main is the only place that creates it.",
 		"burrow/store": "Handlers know teams and versions, not keys in a KV store. Map " +
 			"access errors in writeError; store errors never reach this layer.",
@@ -128,8 +128,8 @@ func TestLA_4_ImportRules(t *testing.T) {
 	}
 }
 
-// Only a program chooses an adapter. Everything else depends on access
-// and its ports.
+// Only a program chooses an adapter. Everything else (kvrepo's own tree
+// aside) depends on access and its ports.
 func TestLA_4_OnlyMainKnowsKvrepo(t *testing.T) {
 	root := testkit.ModuleRoot(t)
 	var dirs []string
@@ -152,7 +152,7 @@ func TestLA_4_OnlyMainKnowsKvrepo(t *testing.T) {
 		return nil
 	})
 	for _, dir := range dirs {
-		if dir == "cmd" || strings.HasPrefix(dir, "cmd/") || dir == "access/kvrepo" {
+		if under(dir, "cmd") || under(dir, "access/kvrepo") {
 			continue
 		}
 		imps, _ := importsIn(t, root, dir)

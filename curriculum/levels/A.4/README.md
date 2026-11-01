@@ -211,8 +211,8 @@ Import rules (direct imports of non-test files; test files and `//go:build ignor
 |---|---|
 | `access` | anything under `burrow/`, `net/http` and below, `database/sql` |
 | `access/kvrepo` | `net/http` and below, `burrow/api`, `burrow/access/httpapi` |
-| `access/httpapi` | `burrow/access/kvrepo`, `burrow/burrow`, `burrow/store` |
-| everything outside `cmd/` | `burrow/access/kvrepo` |
+| `access/httpapi` | `burrow/access/kvrepo`, `burrow/sdk/burrow`, `burrow/store` |
+| everything outside `cmd/` and `access/kvrepo/` | `burrow/access/kvrepo` |
 
 Decisions the tests rely on:
 
@@ -235,7 +235,7 @@ Decisions the tests rely on:
 - `run` usage errors: no command, unknown command, `serve` without `-burrow`, unknown flag, all exit 2 naming the problem
 - The built `accessd` against an `httptest` Burrow: `http on` line, a team created through it is in Burrow at `access/team/<id>` with the same version, issuing and authenticating work, `X-Request-ID` is set, events are logged as JSON lines with `msg` `event` and both event types, no token is logged, and `SIGTERM` exits 0
 - TestLA_4_ImportRules: the four directories exist, and the deny-lists above hold, failing with `file:line` and an explanation
-- TestLA_4_OnlyMainKnowsKvrepo: a walk over the whole module (skipping nested modules, dot directories and `testdata`) finds `burrow/access/kvrepo` imported only under `cmd/`
+- TestLA_4_OnlyMainKnowsKvrepo: a walk over the whole module (skipping nested modules, dot directories and `testdata`) finds `burrow/access/kvrepo` imported only under `cmd/` (and by its own sub-packages)
 
 ## Try it
 

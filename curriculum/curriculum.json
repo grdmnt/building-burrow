@@ -2867,6 +2867,204 @@
       ]
     },
     {
+      "key": "A",
+      "name": "Architecture",
+      "optional": true,
+      "needs": [
+        "7"
+      ],
+      "line": "Optional: how a Go service is divided, for anyone who knows Rails and DDD. A second service, accessd, built layer by layer: aggregate, service and ports, a Burrow repository, an HTTP edge and main, with the dependency rules checked by tests.",
+      "pos": {
+        "row": 5,
+        "col": 4,
+        "span": 1
+      },
+      "levels": [
+        {
+          "id": "A.1",
+          "title": "Aggregate",
+          "brief": "The innermost layer of a second service, accessd: access.Team, an aggregate that issues, revokes and checks API keys under its invariants and records events, with no I/O; your own table tests are graded by mutation.",
+          "idea": "Rules live on the type that owns the data: a pure aggregate with sentinel errors and recorded events, tested without mocks",
+          "difficulty": 2,
+          "build": [
+            "`access.Team`, `Key`, `Role`, `Event` and the seven sentinel errors",
+            "`NewTeam`, `IssueKey`, `RevokeKey` that check every rule before changing anything",
+            "`Authenticate` over SHA-256 hashes with `subtle.ConstantTimeCompare`, and `PullEvents`",
+            "Your own table-driven tests in `access/`"
+          ],
+          "win": "Key names are unique, a team holds at most 10 keys, revoked keys never authenticate or come back, failed commands change nothing, every success records one event, and your own tests catch all five planted bugs.",
+          "go": [
+            "package layout by dependency, not by layer",
+            "pointer receivers that change state",
+            "check-then-change commands",
+            "sentinel errors as a domain vocabulary",
+            "passing time in",
+            "crypto/sha256 and [32]byte arrays",
+            "crypto/subtle.ConstantTimeCompare",
+            "string types as enums",
+            "mutation-graded table tests"
+          ],
+          "pkgs": [
+            "errors",
+            "fmt",
+            "time",
+            "crypto/sha256",
+            "crypto/subtle"
+          ],
+          "hints": [
+            "Every command has one shape: run all the checks first and return on the first failure, and only then append to t.Keys and record the event. A failed command leaves the team exactly as it was.",
+            "Revoked keys stay in t.Keys: they still own their name and still count towards MaxKeys. Key.Active() is just k.Revoked.IsZero().",
+            "Authenticate: h := HashToken(token), then loop over every key with subtle.ConstantTimeCompare(h[:], k.Hash[:]) == 1; ErrKeyNotFound if nothing matched, ErrRevoked if the match isn't Active. PullEvents: ev := t.events; t.events = nil; return ev."
+          ],
+          "wild": "Ben Johnson's Standard Package Layout and WTF Dial keep the domain in the root package; GitHub, Stripe and GitLab store only a hash of each API token and show it once",
+          "unlock": "Team aggregate",
+          "consumes": []
+        },
+        {
+          "id": "A.2",
+          "title": "Ports",
+          "brief": "access.Service runs one use case per method over two ports it declares itself, TeamStore and EventSink, with the clock and randomness injected; an in-memory store passes the provided conformance suite.",
+          "idea": "The consumer owns the interface: accept interfaces, return structs, inject through the constructor, and carry the version end to end",
+          "difficulty": 2,
+          "build": [
+            "`TeamStore` and `EventSink` ports, `Options`, `NewService`",
+            "`CreateTeam`, `IssueKey`, `RevokeKey`, `DeleteTeam`, `GetTeam`, `ListTeams`, `Authenticate`",
+            "Events published only after a successful save",
+            "`access.NewMemStore()` passing `accesstest.RunTeamStore`"
+          ],
+          "win": "accesstest.RunTeamStore passes over the memory store, a stale version is ErrConflict and exactly one of eight racing writers wins, events arrive once and only after the save, and a store outage never looks like a bad token.",
+          "go": [
+            "interfaces declared by the consumer",
+            "accept interfaces, return structs",
+            "constructor injection",
+            "Options structs with zero-value defaults",
+            "func values as injected clocks",
+            "io.Reader as a random source",
+            "io.ReadFull",
+            "optimistic concurrency through an expected version",
+            "passing errors across a boundary",
+            "a provided conformance suite"
+          ],
+          "pkgs": [
+            "context",
+            "crypto/rand",
+            "encoding/hex",
+            "io",
+            "sync",
+            "slices"
+          ],
+          "hints": [
+            "Every command is: load, check the version, call the aggregate, PullEvents, Save(ctx, t, version), then Publish. Pull before Save so events never reach the store, and publish only when Save returned nil.",
+            "MemStore copies both ways: c := *t; c.Keys = slices.Clone(t.Keys); c.events = nil. Save compares the stored version (0 when missing) with expectedVersion, stores the copy at +1 and sets t.Version.",
+            "Authenticate: FindByKey(ctx, HashToken(token)). ErrTeamNotFound, or any error from team.Authenticate, becomes ErrUnauthenticated; any other store error is returned as it is."
+          ],
+          "wild": "Alistair Cockburn's ports and adapters; io.Reader is the standard library's consumer-side interface; Google's Wire generates the constructor calls you would otherwise write by hand",
+          "unlock": "Access service",
+          "consumes": [
+            "Team aggregate"
+          ]
+        },
+        {
+          "id": "A.3",
+          "title": "Repository",
+          "brief": "access/kvrepo keeps each team as one JSON document under one Burrow key, written with compare-and-swap, plus a re-verified key-hash index, through a KV interface that both store.Memory and burrow.Client satisfy.",
+          "idea": "One aggregate per key: the entry version is the team's version, CAS is the lock, and a second key is only ever a hint",
+          "difficulty": 3,
+          "build": [
+            "`kvrepo.KV` (Get, CompareAndSwap, CompareAndDelete, Keys) and `kvrepo.New`",
+            "A JSON document type separate from `access.Team`",
+            "`Save` as CAS on `access/team/<id>`, then create-only index entries `access/key/<sha256 hex>`",
+            "`FindByKey` that re-checks the index against the team",
+            "Store errors translated to `ErrTeamNotFound` and `ErrConflict`, everything else wrapped"
+          ],
+          "win": "accesstest.RunTeamStore passes over store.Memory and over burrow.Client to an httptest api.Server, a failed index write is repaired by the next save, forged index entries are rejected, and two services sharing one Burrow never lose an update.",
+          "go": [
+            "interfaces declared by the adapter",
+            "a DTO beside the domain type",
+            "encoding/json struct tags",
+            "versions from the store, not the document",
+            "compare-and-swap as a save",
+            "ordering non-atomic writes",
+            "re-verifying an index",
+            "translating sentinels at a boundary",
+            "the internal/ directory rule"
+          ],
+          "pkgs": [
+            "encoding/json",
+            "encoding/hex",
+            "errors",
+            "fmt",
+            "strings",
+            "context"
+          ],
+          "hints": [
+            "Save is one CompareAndSwap(ctx, \"access/team/\"+t.ID, expected, doc). store.ErrVersionMismatch, or store.ErrNotFound when expected != 0, is access.ErrConflict; on success set t.Version = e.Version.",
+            "After the team, CompareAndSwap(indexKey, 0, []byte(t.ID)) for every key, ignoring store.ErrVersionMismatch (it's already there). Writing all of them every time is what repairs an earlier failure.",
+            "FindByKey: Get the index entry, Get the team it names, then look for k.Hash == hash among its keys; anything missing on the way is ErrTeamNotFound. Treat store.ErrInvalidKey as not found too, and wrap every other error with %w."
+          ],
+          "wild": "Kubernetes stores each object as one etcd value with resourceVersion as the CAS token and answers 409 to a stale update; DynamoDB single-table designs pair conditional writes with eventually consistent index items",
+          "unlock": "KV repository",
+          "consumes": [
+            "Access service",
+            "HTTP client lib",
+            "CAS",
+            "Memory store"
+          ]
+        },
+        {
+          "id": "A.4",
+          "title": "Composition Root",
+          "brief": "access/httpapi maps seven routes onto the Service with one writeError and ETag/If-Match, cmd/accessd wires burrow.Client, kvrepo, Service, httpapi and http.Server in main, and tests parse the imports to keep every dependency pointing inwards.",
+          "idea": "The only package that knows every concrete type is main: thin handlers, one error mapping, and the architecture checked with go/parser",
+          "difficulty": 3,
+          "build": [
+            "`httpapi.New(svc, logger)`: seven routes inside Burrow's middleware chain",
+            "One `writeError` from domain errors to 400, 401, 404, 412, 422, 428, 503 and 500",
+            "`ETag` on team responses and a required `If-Match` for key changes",
+            "`cmd/accessd serve -burrow <url> -http <addr>` with an event-logging sink and graceful shutdown",
+            "The import rules, kept"
+          ],
+          "win": "Every route and error status matches the table, a 500 never leaks its cause, two clients with the same If-Match get one 201 and one 412, the built accessd stores teams in a real Burrow and exits 0 on SIGTERM, and the import rules hold across the module.",
+          "go": [
+            "handlers that only translate",
+            "one error-to-status function",
+            "422, 428 and 412",
+            "ETag and If-Match",
+            "a response DTO",
+            "reusing another package's middleware",
+            "the composition root in main",
+            "go/parser with ImportsOnly",
+            "token.FileSet positions",
+            "architecture rules as tests",
+            "deny-lists over allow-lists"
+          ],
+          "pkgs": [
+            "net/http",
+            "encoding/json",
+            "log/slog",
+            "go/parser",
+            "go/token",
+            "strconv",
+            "os/signal"
+          ],
+          "hints": [
+            "Handlers are decode, call, writeError, encode. Put the whole status table in one writeError switch on errors.Is; the 500 case logs err and sends only the request ID from api.RequestIDFrom(r.Context()).",
+            "ifMatch returns a sentinel when the header is missing (428) and a bad-request error when it isn't digits in quotes (400). Every team response sets ETag to fmt.Sprintf(`\"%d\"`, t.Version).",
+            "main: burrow.New(url, burrow.Options{}) -> kvrepo.New -> access.NewService(repo, access.Options{Events: logSink{logger}}) -> httpapi.New(svc, logger) in an http.Server with 7.4's four timeouts. net.Listen, print \"http on \" + ln.Addr().String(), Serve in a goroutine, and Shutdown with a 10 s budget once signal.NotifyContext is done."
+          ],
+          "wild": "Shopify's Packwerk, go-arch-lint and Kubernetes' import-boss enforce the same kind of rules; kube-apiserver is the large version of accessd: an HTTP edge over aggregates stored one per key in etcd",
+          "unlock": "Layered service",
+          "consumes": [
+            "KV repository",
+            "Access service",
+            "JSON API",
+            "Middleware chain",
+            "Deadline guard"
+          ]
+        }
+      ]
+    },
+    {
       "key": "S",
       "name": "TLS & Auth",
       "optional": true,

@@ -370,8 +370,16 @@ func TestLA_4_DeadlineReachesTheStore(t *testing.T) {
 	bs := &blockingStore{}
 	s := start(t, bs)
 	begin := time.Now()
-	r := s.do(t, "GET", "/v1/teams/x", "")
+	hc := &http.Client{Timeout: 5 * time.Second}
+	resp, err := hc.Get(s.url + "/v1/teams/x")
+	if err != nil {
+		t.Fatalf("no answer within 5 s (%v): a store that never returns must be cut off by "+
+			"api.Timeout(time.Second) in the chain, with r.Context() passed to the Service", err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 	took := time.Since(begin)
+	r := reply{resp.StatusCode, resp.Header, b}
 	s.expectError(t, r, http.StatusServiceUnavailable, "unavailable")
 	if took < 500*time.Millisecond || took > 3*time.Second {
 		t.Errorf("the request took %v; want about 1 s, from api.Timeout(time.Second) in the chain", took)

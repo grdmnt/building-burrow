@@ -42,7 +42,7 @@ type KV interface {
 }
 ```
 
-That is A.2's lesson from the other side: `kvrepo` is now the consumer. The interface is smaller than `store.Store`, so it is easy to fake, and it leaves out `Set`, `Delete` and `Batch` on purpose: a repository built only on compare-and-swap can't overwrite a newer team by accident. `kvrepo` imports `burrow/store` for `store.Entry` and the sentinel errors, but never `burrow/burrow` or `net/http`; `main` hands it a `*burrow.Client` in A.4.
+That is A.2's lesson from the other side: `kvrepo` is now the consumer. The interface is smaller than `store.Store`, so it is easy to fake, and it leaves out `Set`, `Delete` and `Batch` on purpose: a repository built only on compare-and-swap can't overwrite a newer team by accident. `kvrepo` imports `burrow/store` for `store.Entry` and the sentinel errors, but never `burrow/sdk/burrow` or `net/http`; `main` hands it a `*burrow.Client` in A.4.
 
 **3. A document type of its own.** The stored JSON is a separate, unexported struct with `json` tags (a *DTO*, data transfer object), and `kvrepo` converts between it and `access.Team`. The domain types carry no tags, so the domain doesn't know it is ever serialised, and you can change the stored format without touching the rules. The conversion is also where the hash becomes hex text and a zero `Revoked` time becomes an absent field.
 

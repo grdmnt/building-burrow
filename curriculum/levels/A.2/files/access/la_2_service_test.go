@@ -15,16 +15,16 @@ import (
 	"burrow/internal/testkit"
 )
 
-// sink records published events. It can look at the store when Publish is
+// la2Sink records published events. It can look at the store when Publish is
 // called, to check events arrive after the save.
-type sink struct {
+type la2Sink struct {
 	mu     sync.Mutex
 	events []access.Event
 	calls  int
 	onPub  func([]access.Event)
 }
 
-func (s *sink) Publish(ctx context.Context, events []access.Event) {
+func (s *la2Sink) Publish(ctx context.Context, events []access.Event) {
 	if s.onPub != nil {
 		s.onPub(events)
 	}
@@ -34,7 +34,7 @@ func (s *sink) Publish(ctx context.Context, events []access.Event) {
 	s.events = append(s.events, events...)
 }
 
-func (s *sink) take() []access.Event {
+func (s *la2Sink) take() []access.Event {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ev := s.events
@@ -42,13 +42,13 @@ func (s *sink) take() []access.Event {
 	return ev
 }
 
-// seqReader is a deterministic stand-in for crypto/rand.
-type seqReader struct {
+// la2SeqReader is a deterministic stand-in for crypto/rand.
+type la2SeqReader struct {
 	mu sync.Mutex
 	n  byte
 }
 
-func (r *seqReader) Read(p []byte) (int, error) {
+func (r *la2SeqReader) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := range p {
@@ -58,26 +58,26 @@ func (r *seqReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-type failReader struct{}
+type la2FailReader struct{}
 
-func (failReader) Read(p []byte) (int, error) { return 0, errors.New("entropy ran out") }
+func (la2FailReader) Read(p []byte) (int, error) { return 0, errors.New("entropy ran out") }
 
-type fixture struct {
+type la2Fixture struct {
 	svc   *access.Service
 	store *access.MemStore
-	sink  *sink
+	sink  *la2Sink
 	clock *testkit.FakeClock
 }
 
-func newFixture(t *testing.T) *fixture {
+func la2NewFixture(t *testing.T) *la2Fixture {
 	t.Helper()
-	f := &fixture{store: access.NewMemStore(), sink: &sink{}, clock: testkit.NewFakeClock()}
+	f := &la2Fixture{store: access.NewMemStore(), sink: &la2Sink{}, clock: testkit.NewFakeClock()}
 	f.svc = access.NewService(f.store, access.Options{
-		Clock: f.clock.Now, Rand: &seqReader{}, Events: f.sink})
+		Clock: f.clock.Now, Rand: &la2SeqReader{}, Events: f.sink})
 	return f
 }
 
-func (f *fixture) team(t *testing.T, name string) *access.Team {
+func (f *la2Fixture) team(t *testing.T, name string) *access.Team {
 	t.Helper()
 	tm, err := f.svc.CreateTeam(context.Background(), name)
 	if err != nil {
@@ -86,7 +86,7 @@ func (f *fixture) team(t *testing.T, name string) *access.Team {
 	return tm
 }
 
-func (f *fixture) key(t *testing.T, tm *access.Team, name string) string {
+func (f *la2Fixture) key(t *testing.T, tm *access.Team, name string) string {
 	t.Helper()
 	tok, nt, err := f.svc.IssueKey(context.Background(), tm.ID, tm.Version, name, access.RoleWrite)
 	if err != nil {
@@ -96,7 +96,7 @@ func (f *fixture) key(t *testing.T, tm *access.Team, name string) string {
 	return tok
 }
 
-func types(ev []access.Event) []string {
+func la2Types(ev []access.Event) []string {
 	var s []string
 	for _, e := range ev {
 		s = append(s, string(e.Type)+":"+e.Key)
@@ -105,15 +105,15 @@ func types(ev []access.Event) []string {
 }
 
 var (
-	idRE    = regexp.MustCompile(`^[0-9a-f]{32}$`)
-	tokenRE = regexp.MustCompile(`^brw_[0-9a-f]{64}$`)
+	la2IdRE    = regexp.MustCompile(`^[0-9a-f]{32}$`)
+	la2TokenRE = regexp.MustCompile(`^brw_[0-9a-f]{64}$`)
 )
 
 func TestLA_2_CreateTeam(t *testing.T) {
-	f := newFixture(t)
+	f := la2NewFixture(t)
 	ctx := context.Background()
 	tm := f.team(t, "Platform")
-	if !idRE.MatchString(tm.ID) {
+	if !la2IdRE.MatchString(tm.ID) {
 		t.Errorf("team ID %q should be 16 bytes from Options.Rand, hex-encoded (32 characters)", tm.ID)
 	}
 	if tm.Name != "Platform" || tm.Version == 0 {
@@ -153,7 +153,7 @@ func TestLA_2_InjectedRandomness(t *testing.T) {
 		return access.NewService(access.NewMemStore(), access.Options{Rand: r})
 	}
 	ctx := context.Background()
-	a, b := mk(&seqReader{}), mk(&seqReader{})
+	a, b := mk(&la2SeqReader{}), mk(&la2SeqReader{})
 	ta, err1 := a.CreateTeam(ctx, "x")
 	tb, err2 := b.CreateTeam(ctx, "x")
 	if err1 != nil || err2 != nil {
@@ -168,11 +168,11 @@ func TestLA_2_InjectedRandomness(t *testing.T) {
 	if err1 != nil || err2 != nil {
 		t.Fatal(err1, err2)
 	}
-	if ka != kb || !tokenRE.MatchString(ka) {
+	if ka != kb || !la2TokenRE.MatchString(ka) {
 		t.Errorf("tokens %q and %q: want identical brw_ + 64 hex characters (32 bytes from Options.Rand)", ka, kb)
 	}
 
-	bad := mk(failReader{})
+	bad := mk(la2FailReader{})
 	if tm, err := bad.CreateTeam(ctx, "x"); err == nil {
 		t.Errorf("CreateTeam with a failing Rand = (%+v, nil), want the read error", tm)
 	}
@@ -183,16 +183,16 @@ func TestLA_2_InjectedRandomness(t *testing.T) {
 	def := access.NewService(access.NewMemStore(), access.Options{})
 	t1, err1 := def.CreateTeam(ctx, "x")
 	t2, err2 := def.CreateTeam(ctx, "y")
-	if err1 != nil || err2 != nil || t1.ID == t2.ID || !idRE.MatchString(t1.ID) {
-		t.Errorf("with zero Options (crypto/rand, time.Now, no sink): %v %v %v %v", t1, err1, t2, err2)
+	if err1 != nil || err2 != nil || t1.ID == t2.ID || !la2IdRE.MatchString(t1.ID) {
+		t.Errorf("with zero Options (crypto/rand, time.Now, no la2Sink): %v %v %v %v", t1, err1, t2, err2)
 	}
 	if _, _, err := def.IssueKey(ctx, t1.ID, t1.Version, "k", access.RoleRead); err != nil {
-		t.Errorf("IssueKey with no Events sink = %v; a nil sink means events are dropped", err)
+		t.Errorf("IssueKey with no Events la2Sink = %v; a nil la2Sink means events are dropped", err)
 	}
 }
 
 func TestLA_2_IssueKey(t *testing.T) {
-	f := newFixture(t)
+	f := la2NewFixture(t)
 	ctx := context.Background()
 	tm := f.team(t, "Platform")
 	f.sink.take()
@@ -202,7 +202,7 @@ func TestLA_2_IssueKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("IssueKey = %v", err)
 	}
-	if !tokenRE.MatchString(tok) {
+	if !la2TokenRE.MatchString(tok) {
 		t.Errorf("token %q should be brw_ followed by 64 hex characters", tok)
 	}
 	if nt.Version <= v || len(nt.Keys) != 1 {
@@ -216,7 +216,7 @@ func TestLA_2_IssueKey(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%+v", got), tok) {
 		t.Errorf("the stored team contains the plaintext token")
 	}
-	if ev := types(f.sink.take()); fmt.Sprint(ev) != "[key.issued:ci]" {
+	if ev := la2Types(f.sink.take()); fmt.Sprint(ev) != "[key.issued:ci]" {
 		t.Errorf("published %v, want [key.issued:ci] and nothing else (no repeat of team.created)", ev)
 	}
 
@@ -255,7 +255,7 @@ func TestLA_2_IssueKey(t *testing.T) {
 }
 
 func TestLA_2_RevokeAndAuthenticate(t *testing.T) {
-	f := newFixture(t)
+	f := la2NewFixture(t)
 	ctx := context.Background()
 	tm := f.team(t, "Platform")
 	ci := f.key(t, tm, "ci")
@@ -279,7 +279,7 @@ func TestLA_2_RevokeAndAuthenticate(t *testing.T) {
 	if err != nil || nt.Version <= tm.Version {
 		t.Fatalf("RevokeKey = (%v, %v), want the saved team with a new version", nt, err)
 	}
-	if ev := types(f.sink.take()); fmt.Sprint(ev) != "[key.revoked:ci]" {
+	if ev := la2Types(f.sink.take()); fmt.Sprint(ev) != "[key.revoked:ci]" {
 		t.Errorf("published %v, want [key.revoked:ci]", ev)
 	}
 	if _, _, err := f.svc.Authenticate(ctx, ci); !errors.Is(err, access.ErrUnauthenticated) {
@@ -306,27 +306,27 @@ func TestLA_2_RevokeAndAuthenticate(t *testing.T) {
 	}
 }
 
-// brokenStore fails every call with err, to see how errors cross the
+// la2BrokenStore fails every call with err, to see how errors cross the
 // Service boundary.
-type brokenStore struct{ err error }
+type la2BrokenStore struct{ err error }
 
-func (b brokenStore) Get(ctx context.Context, id string) (*access.Team, error) {
+func (b la2BrokenStore) Get(ctx context.Context, id string) (*access.Team, error) {
 	return nil, b.err
 }
 
-func (b brokenStore) Save(ctx context.Context, t *access.Team, v uint64) error { return b.err }
+func (b la2BrokenStore) Save(ctx context.Context, t *access.Team, v uint64) error { return b.err }
 
-func (b brokenStore) Delete(ctx context.Context, id string) error { return b.err }
+func (b la2BrokenStore) Delete(ctx context.Context, id string) error { return b.err }
 
-func (b brokenStore) List(ctx context.Context) ([]*access.Team, error) { return nil, b.err }
+func (b la2BrokenStore) List(ctx context.Context) ([]*access.Team, error) { return nil, b.err }
 
-func (b brokenStore) FindByKey(ctx context.Context, h [32]byte) (*access.Team, error) {
+func (b la2BrokenStore) FindByKey(ctx context.Context, h [32]byte) (*access.Team, error) {
 	return nil, b.err
 }
 
 func TestLA_2_OutageIsNotUnauthenticated(t *testing.T) {
 	outage := errors.New("store unreachable")
-	svc := access.NewService(brokenStore{err: outage}, access.Options{})
+	svc := access.NewService(la2BrokenStore{err: outage}, access.Options{})
 	_, _, err := svc.Authenticate(context.Background(), "brw_x")
 	if !errors.Is(err, outage) || errors.Is(err, access.ErrUnauthenticated) {
 		t.Errorf("Authenticate during a store outage = %v; want the store's error, "+
@@ -340,10 +340,10 @@ func TestLA_2_OutageIsNotUnauthenticated(t *testing.T) {
 	}
 }
 
-// conflictStore wraps a real store but every Save loses the race.
-type conflictStore struct{ access.TeamStore }
+// la2ConflictStore wraps a real store but every Save loses the race.
+type la2ConflictStore struct{ access.TeamStore }
 
-func (conflictStore) Save(ctx context.Context, t *access.Team, v uint64) error {
+func (la2ConflictStore) Save(ctx context.Context, t *access.Team, v uint64) error {
 	return access.ErrConflict
 }
 
@@ -353,8 +353,8 @@ func TestLA_2_EventsOnlyAfterSave(t *testing.T) {
 	seed := access.NewService(mem, access.Options{})
 	tm, _ := seed.CreateTeam(ctx, "x")
 
-	sk := &sink{}
-	svc := access.NewService(conflictStore{mem}, access.Options{Events: sk})
+	sk := &la2Sink{}
+	svc := access.NewService(la2ConflictStore{mem}, access.Options{Events: sk})
 	if _, err := svc.CreateTeam(ctx, "y"); !errors.Is(err, access.ErrConflict) {
 		t.Errorf("CreateTeam when Save fails = %v, want the store's ErrConflict", err)
 	}
@@ -366,7 +366,7 @@ func TestLA_2_EventsOnlyAfterSave(t *testing.T) {
 	}
 
 	// With a working store, the change is visible by the time Publish runs.
-	sk2 := &sink{}
+	sk2 := &la2Sink{}
 	svc2 := access.NewService(mem, access.Options{Events: sk2})
 	sk2.onPub = func(ev []access.Event) {
 		for _, e := range ev {
@@ -382,54 +382,54 @@ func TestLA_2_EventsOnlyAfterSave(t *testing.T) {
 	}
 	nt, _ := svc2.CreateTeam(ctx, "z")
 	svc2.IssueKey(ctx, nt.ID, nt.Version, "k", access.RoleRead)
-	if got := types(sk2.take()); fmt.Sprint(got) != "[team.created: key.issued:k]" {
+	if got := la2Types(sk2.take()); fmt.Sprint(got) != "[team.created: key.issued:k]" {
 		t.Errorf("published %v, want [team.created: key.issued:k], each exactly once", got)
 	}
 }
 
-type ctxKey struct{}
+type la2CtxKey struct{}
 
-// ctxStore checks that every call carries the caller's context.
-type ctxStore struct {
+// la2CtxStore checks that every call carries the caller's context.
+type la2CtxStore struct {
 	access.TeamStore
 	t *testing.T
 }
 
-func (s ctxStore) check(ctx context.Context, m string) {
-	if ctx.Value(ctxKey{}) != "caller" {
+func (s la2CtxStore) check(ctx context.Context, m string) {
+	if ctx.Value(la2CtxKey{}) != "caller" {
 		s.t.Errorf("TeamStore.%s got a context that isn't the caller's; pass ctx through, "+
 			"never context.Background()", m)
 	}
 }
 
-func (s ctxStore) Get(ctx context.Context, id string) (*access.Team, error) {
+func (s la2CtxStore) Get(ctx context.Context, id string) (*access.Team, error) {
 	s.check(ctx, "Get")
 	return s.TeamStore.Get(ctx, id)
 }
 
-func (s ctxStore) Save(ctx context.Context, t *access.Team, v uint64) error {
+func (s la2CtxStore) Save(ctx context.Context, t *access.Team, v uint64) error {
 	s.check(ctx, "Save")
 	return s.TeamStore.Save(ctx, t, v)
 }
 
-func (s ctxStore) Delete(ctx context.Context, id string) error {
+func (s la2CtxStore) Delete(ctx context.Context, id string) error {
 	s.check(ctx, "Delete")
 	return s.TeamStore.Delete(ctx, id)
 }
 
-func (s ctxStore) List(ctx context.Context) ([]*access.Team, error) {
+func (s la2CtxStore) List(ctx context.Context) ([]*access.Team, error) {
 	s.check(ctx, "List")
 	return s.TeamStore.List(ctx)
 }
 
-func (s ctxStore) FindByKey(ctx context.Context, h [32]byte) (*access.Team, error) {
+func (s la2CtxStore) FindByKey(ctx context.Context, h [32]byte) (*access.Team, error) {
 	s.check(ctx, "FindByKey")
 	return s.TeamStore.FindByKey(ctx, h)
 }
 
 func TestLA_2_ContextReachesTheStore(t *testing.T) {
-	svc := access.NewService(ctxStore{access.NewMemStore(), t}, access.Options{})
-	ctx := context.WithValue(context.Background(), ctxKey{}, "caller")
+	svc := access.NewService(la2CtxStore{access.NewMemStore(), t}, access.Options{})
+	ctx := context.WithValue(context.Background(), la2CtxKey{}, "caller")
 	tm, err := svc.CreateTeam(ctx, "x")
 	if err != nil {
 		t.Fatal(err)
@@ -447,7 +447,7 @@ func TestLA_2_ContextReachesTheStore(t *testing.T) {
 
 func TestLA_2_ConcurrentIssueNoLostUpdate(t *testing.T) {
 	testkit.RequireRace(t)
-	f := newFixture(t)
+	f := la2NewFixture(t)
 	tm := f.team(t, "x")
 	f.sink.take()
 	const n = 8
@@ -481,7 +481,7 @@ func TestLA_2_ConcurrentIssueNoLostUpdate(t *testing.T) {
 }
 
 func TestLA_2_ListTeams(t *testing.T) {
-	f := newFixture(t)
+	f := la2NewFixture(t)
 	ctx := context.Background()
 	if lst, err := f.svc.ListTeams(ctx); err != nil || len(lst) != 0 {
 		t.Errorf("ListTeams on an empty store = (%v, %v)", lst, err)

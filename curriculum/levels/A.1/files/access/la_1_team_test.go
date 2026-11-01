@@ -17,11 +17,11 @@ import (
 	"burrow/access"
 )
 
-var t0 = time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+var la1T0 = time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 
-func newTeam(t *testing.T) *access.Team {
+func la1NewTeam(t *testing.T) *access.Team {
 	t.Helper()
-	team, err := access.NewTeam("t1", "Platform", t0)
+	team, err := access.NewTeam("t1", "Platform", la1T0)
 	if err != nil {
 		t.Fatalf("NewTeam(t1, Platform) = %v, want no error", err)
 	}
@@ -29,23 +29,23 @@ func newTeam(t *testing.T) *access.Team {
 	return team
 }
 
-func issue(t *testing.T, team *access.Team, name string) access.Key {
+func la1Issue(t *testing.T, team *access.Team, name string) access.Key {
 	t.Helper()
-	k, err := team.IssueKey(name, access.RoleWrite, "tok-"+name, t0)
+	k, err := team.IssueKey(name, access.RoleWrite, "tok-"+name, la1T0)
 	if err != nil {
 		t.Fatalf("IssueKey(%q) = %v, want no error", name, err)
 	}
 	return k
 }
 
-// snapshot copies the parts of a team a failed command must not change.
-func snapshot(team *access.Team) access.Team {
+// la1Snapshot copies the parts of a team a failed command must not change.
+func la1Snapshot(team *access.Team) access.Team {
 	c := *team
 	c.Keys = slices.Clone(team.Keys)
 	return c
 }
 
-func sameTeam(a, b access.Team) bool {
+func la1SameTeam(a, b access.Team) bool {
 	return a.ID == b.ID && a.Name == b.Name && a.Version == b.Version &&
 		reflect.DeepEqual(a.Keys, b.Keys)
 }
@@ -104,7 +104,7 @@ func TestLA_1_HashToken(t *testing.T) {
 }
 
 func TestLA_1_NewTeam(t *testing.T) {
-	team, err := access.NewTeam("t1", "Platform", t0)
+	team, err := access.NewTeam("t1", "Platform", la1T0)
 	if err != nil {
 		t.Fatalf("NewTeam = %v", err)
 	}
@@ -114,7 +114,7 @@ func TestLA_1_NewTeam(t *testing.T) {
 			"no keys, Version 0 (the store sets the version on Save)", *team)
 	}
 	ev := team.PullEvents()
-	want := []access.Event{{Type: access.TeamCreated, TeamID: "t1", At: t0}}
+	want := []access.Event{{Type: access.TeamCreated, TeamID: "t1", At: la1T0}}
 	if !reflect.DeepEqual(ev, want) {
 		t.Errorf("a new team should have recorded %+v, got %+v", want, ev)
 	}
@@ -123,7 +123,7 @@ func TestLA_1_NewTeam(t *testing.T) {
 			"call gave %+v", ev)
 	}
 
-	if _, err := access.NewTeam("t2", strings.Repeat("n", 64), t0); err != nil {
+	if _, err := access.NewTeam("t2", strings.Repeat("n", 64), la1T0); err != nil {
 		t.Errorf("a 64-byte name is allowed, got %v", err)
 	}
 	bad := []struct{ name, id, team string }{
@@ -133,7 +133,7 @@ func TestLA_1_NewTeam(t *testing.T) {
 	}
 	for _, c := range bad {
 		t.Run(c.name, func(t *testing.T) {
-			team, err := access.NewTeam(c.id, c.team, t0)
+			team, err := access.NewTeam(c.id, c.team, la1T0)
 			if !errors.Is(err, access.ErrInvalid) {
 				t.Errorf("NewTeam(%q, %q) = %v, want an error wrapping ErrInvalid",
 					c.id, c.team, err)
@@ -146,8 +146,8 @@ func TestLA_1_NewTeam(t *testing.T) {
 }
 
 func TestLA_1_IssueKey(t *testing.T) {
-	team := newTeam(t)
-	at := t0.Add(time.Hour)
+	team := la1NewTeam(t)
+	at := la1T0.Add(time.Hour)
 	k, err := team.IssueKey("ci", access.RoleRead, "brw_secret", at)
 	if err != nil {
 		t.Fatalf("IssueKey = %v", err)
@@ -168,7 +168,7 @@ func TestLA_1_IssueKey(t *testing.T) {
 		t.Errorf("IssueKey should record one key.issued event for ci at "+
 			"the given time, got %+v", ev)
 	}
-	issue(t, team, "deploy")
+	la1Issue(t, team, "deploy")
 	if team.Keys[0].Name != "ci" || team.Keys[1].Name != "deploy" {
 		t.Errorf("keys should stay in the order they were issued, got %+v",
 			team.Keys)
@@ -198,41 +198,41 @@ func TestLA_1_IssueKeyRejects(t *testing.T) {
 		{"no role", nil, "ci", "", "tok", access.ErrInvalid},
 		{"unknown role", nil, "ci", "admin", "tok", access.ErrInvalid},
 		{"empty token", nil, "ci", access.RoleRead, "", access.ErrInvalid},
-		{"duplicate name", func(t *testing.T, team *access.Team) { issue(t, team, "ci") },
+		{"duplicate name", func(t *testing.T, team *access.Team) { la1Issue(t, team, "ci") },
 			"ci", access.RoleRead, "other", access.ErrDuplicateKey},
 		{"name of a revoked key", func(t *testing.T, team *access.Team) {
-			issue(t, team, "ci")
-			if err := team.RevokeKey("ci", t0); err != nil {
+			la1Issue(t, team, "ci")
+			if err := team.RevokeKey("ci", la1T0); err != nil {
 				t.Fatal(err)
 			}
 		}, "ci", access.RoleRead, "other", access.ErrDuplicateKey},
 		{"eleventh key", func(t *testing.T, team *access.Team) {
 			for i := range 10 {
-				issue(t, team, "k"+string(rune('a'+i)))
+				la1Issue(t, team, "k"+string(rune('a'+i)))
 			}
 		}, "kz", access.RoleRead, "tok", access.ErrTooManyKeys},
 		{"eleventh key with revoked ones", func(t *testing.T, team *access.Team) {
 			for i := range 10 {
-				issue(t, team, "k"+string(rune('a'+i)))
+				la1Issue(t, team, "k"+string(rune('a'+i)))
 			}
-			team.RevokeKey("ka", t0)
-			team.RevokeKey("kb", t0)
+			team.RevokeKey("ka", la1T0)
+			team.RevokeKey("kb", la1T0)
 		}, "kz", access.RoleRead, "tok", access.ErrTooManyKeys},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			team := newTeam(t)
+			team := la1NewTeam(t)
 			if c.setup != nil {
 				c.setup(t, team)
 			}
 			team.PullEvents()
-			before := snapshot(team)
-			_, err := team.IssueKey(c.key, c.role, c.token, t0)
+			before := la1Snapshot(team)
+			_, err := team.IssueKey(c.key, c.role, c.token, la1T0)
 			if !errors.Is(err, c.want) {
 				t.Errorf("IssueKey(%q, %q, %q) = %v, want an error matching %v",
 					c.key, c.role, c.token, err, c.want)
 			}
-			if !sameTeam(before, *team) {
+			if !la1SameTeam(before, *team) {
 				t.Errorf("a rejected IssueKey changed the team: before %+v, "+
 					"after %+v. Check every rule before you change anything",
 					before.Keys, team.Keys)
@@ -243,9 +243,9 @@ func TestLA_1_IssueKeyRejects(t *testing.T) {
 			}
 		})
 	}
-	team := newTeam(t)
+	team := la1NewTeam(t)
 	for i := range 10 {
-		issue(t, team, "k"+string(rune('a'+i)))
+		la1Issue(t, team, "k"+string(rune('a'+i)))
 	}
 	if len(team.Keys) != access.MaxKeys {
 		t.Errorf("ten keys should all be accepted, team has %d", len(team.Keys))
@@ -253,11 +253,11 @@ func TestLA_1_IssueKeyRejects(t *testing.T) {
 }
 
 func TestLA_1_RevokeKey(t *testing.T) {
-	team := newTeam(t)
-	issue(t, team, "ci")
-	issue(t, team, "deploy")
+	team := la1NewTeam(t)
+	la1Issue(t, team, "ci")
+	la1Issue(t, team, "deploy")
 	team.PullEvents()
-	at := t0.Add(2 * time.Hour)
+	at := la1T0.Add(2 * time.Hour)
 	if err := team.RevokeKey("ci", at); err != nil {
 		t.Fatalf("RevokeKey(ci) = %v", err)
 	}
@@ -277,11 +277,11 @@ func TestLA_1_RevokeKey(t *testing.T) {
 		t.Errorf("RevokeKey should record one key.revoked event, got %+v", ev)
 	}
 
-	before := snapshot(team)
+	before := la1Snapshot(team)
 	if err := team.RevokeKey("ci", at.Add(time.Hour)); !errors.Is(err, access.ErrRevoked) {
 		t.Errorf("revoking a revoked key = %v, want ErrRevoked", err)
 	}
-	if !sameTeam(before, *team) {
+	if !la1SameTeam(before, *team) {
 		t.Errorf("revoking twice changed the key: %+v. A revoked key stays "+
 			"exactly as it was", team.Keys[0])
 	}
@@ -294,9 +294,9 @@ func TestLA_1_RevokeKey(t *testing.T) {
 }
 
 func TestLA_1_Authenticate(t *testing.T) {
-	team := newTeam(t)
-	issue(t, team, "ci")
-	if _, err := team.IssueKey("ro", access.RoleRead, "tok-ro", t0); err != nil {
+	team := la1NewTeam(t)
+	la1Issue(t, team, "ci")
+	if _, err := team.IssueKey("ro", access.RoleRead, "tok-ro", la1T0); err != nil {
 		t.Fatal(err)
 	}
 	team.PullEvents()
@@ -310,13 +310,13 @@ func TestLA_1_Authenticate(t *testing.T) {
 			t.Errorf("Authenticate(%q) = (%+v, %v), want ErrKeyNotFound", tok, k, err)
 		}
 	}
-	other, _ := access.NewTeam("t2", "Other", t0)
-	other.IssueKey("x", access.RoleWrite, "tok-x", t0)
+	other, _ := access.NewTeam("t2", "Other", la1T0)
+	other.IssueKey("x", access.RoleWrite, "tok-x", la1T0)
 	if _, err := team.Authenticate("tok-x"); !errors.Is(err, access.ErrKeyNotFound) {
 		t.Errorf("another team's token should be ErrKeyNotFound here, got %v", err)
 	}
 
-	team.RevokeKey("ci", t0)
+	team.RevokeKey("ci", la1T0)
 	team.PullEvents()
 	if k, err := team.Authenticate("tok-ci"); !errors.Is(err, access.ErrRevoked) {
 		t.Errorf("a revoked key's token = (%+v, %v), want ErrRevoked. "+
@@ -331,16 +331,16 @@ func TestLA_1_Authenticate(t *testing.T) {
 }
 
 func TestLA_1_EventsInOrder(t *testing.T) {
-	team, _ := access.NewTeam("t9", "Nine", t0)
-	team.IssueKey("a", access.RoleRead, "ta", t0.Add(1))
-	team.IssueKey("b", access.RoleWrite, "tb", t0.Add(2))
-	team.IssueKey("a", access.RoleWrite, "tc", t0.Add(3)) // rejected
-	team.RevokeKey("a", t0.Add(4))
+	team, _ := access.NewTeam("t9", "Nine", la1T0)
+	team.IssueKey("a", access.RoleRead, "ta", la1T0.Add(1))
+	team.IssueKey("b", access.RoleWrite, "tb", la1T0.Add(2))
+	team.IssueKey("a", access.RoleWrite, "tc", la1T0.Add(3)) // rejected
+	team.RevokeKey("a", la1T0.Add(4))
 	want := []access.Event{
-		{Type: access.TeamCreated, TeamID: "t9", At: t0},
-		{Type: access.KeyIssued, TeamID: "t9", Key: "a", At: t0.Add(1)},
-		{Type: access.KeyIssued, TeamID: "t9", Key: "b", At: t0.Add(2)},
-		{Type: access.KeyRevoked, TeamID: "t9", Key: "a", At: t0.Add(4)},
+		{Type: access.TeamCreated, TeamID: "t9", At: la1T0},
+		{Type: access.KeyIssued, TeamID: "t9", Key: "a", At: la1T0.Add(1)},
+		{Type: access.KeyIssued, TeamID: "t9", Key: "b", At: la1T0.Add(2)},
+		{Type: access.KeyRevoked, TeamID: "t9", Key: "a", At: la1T0.Add(4)},
 	}
 	if got := team.PullEvents(); !reflect.DeepEqual(got, want) {
 		t.Errorf("events = %+v\nwant     %+v", got, want)

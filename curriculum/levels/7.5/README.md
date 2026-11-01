@@ -109,7 +109,7 @@ if errors.As(err, &apiErr) {
 
 ## What to do
 
-1. Create `burrow/client.go` with `Options`, `Client`, `New` and `APIError`. `New` trims a trailing `/` from the base URL, fills in the default `http.Client`, `MaxRetries` 3 and the default backoff when the options are zero.
+1. Create `sdk/burrow/client.go` with `Options`, `Client`, `New` and `APIError`. `New` trims a trailing `/` from the base URL, fills in the default `http.Client`, `MaxRetries` 3 and the default backoff when the options are zero.
 2. Write one private `do(ctx, method, path, body, out any) (*http.Response, error)`:
    - Encode `body` as JSON when it is not nil, set `Accept` and `Content-Type`, build the request with `http.NewRequestWithContext`.
    - Loop up to `MaxRetries` extra times. Retry a transport error (no response) always; retry a `5xx` only when the call is marked idempotent. Back off between attempts, cancellable by `ctx`.
@@ -145,10 +145,12 @@ $ go run ./cmd/burrowctl -http http://127.0.0.1:8080 -addr :7070 get a
 burrowctl: -http and -addr are mutually exclusive
 ```
 
+**One 412, two meanings.** The HTTP API (7.1) answers `412` for any failed `If-Match`, whether the version is stale or the key is missing, because that is what `If-Match` means in HTTP. The `store.Store` contract is stricter: `CompareAndSwap` and `CompareAndDelete` on a missing key must return `store.ErrNotFound` (that is what `RunCAS` checks). So after a `412` on a conditional write, the client does one `GET` of the key: `404` means `store.ErrNotFound`, anything else means `store.ErrVersionMismatch`. The answer can be out of date by the time you read it, which is fine: either error tells the caller to re-read and decide again.
+
 ## Done when
 
 - [ ] `storetest.Run`, `RunCAS` and `RunTTL` pass with a `burrow.Client` pointed at an `httptest.NewServer` running `api.Server`
-- [ ] `404` is `store.ErrNotFound` and also an `*APIError` with the request ID; `412` is `store.ErrVersionMismatch`; `400 invalid_key` is `store.ErrInvalidKey`
+- [ ] `404` is `store.ErrNotFound` and also an `*APIError` with the request ID; `412` is `store.ErrVersionMismatch`, except when the key turns out to be missing (see below); `400 invalid_key` is `store.ErrInvalidKey`
 - [ ] A server that answers `503` twice then `200` makes `Get` succeed in 3 attempts; a `Set` that got a `500` is not retried; a connection reset before any response is retried for `Set` too
 - [ ] The backoff function is called with attempts 1 and 2, and a context cancelled during the wait returns `context.Canceled` promptly
 - [ ] A server that sleeps 5 s with a 100 ms context returns `context.DeadlineExceeded` within 1 s, and the connection is not reused afterwards
@@ -160,7 +162,7 @@ burrowctl: -http and -addr are mutually exclusive
 The exact contract the tests will hold you to.
 
 ```go
-// burrow/client.go
+// sdk/burrow/client.go
 package burrow
 
 type Options struct {
@@ -221,7 +223,7 @@ Pass when: storetest.Run, RunCAS and RunTTL pass through the HTTP client against
 The suite will cover:
 
 - storetest.Run, RunCAS, RunTTL against burrow.New(httptest.NewServer(api.Server{...}.Handler()).URL)
-- Errors: 404 -> store.ErrNotFound and errors.As *APIError with RequestID; 412 -> store.ErrVersionMismatch; 400 invalid_key -> store.ErrInvalidKey
+- Errors: 404 -> store.ErrNotFound and errors.As *APIError with RequestID; 412 -> store.ErrVersionMismatch, or store.ErrNotFound when a follow-up GET finds the key missing; 400 invalid_key -> store.ErrInvalidKey
 - Retries: a handler that returns 503 twice then 200 makes Get succeed with 3 attempts; a Set that got a 500 is not retried; a connection reset before any response is retried for Set too
 - Backoff is called with attempt 1, 2 and respects ctx: a ctx cancelled during backoff returns context.Canceled promptly
 - Deadlines: a server that sleeps 5 s and a 100 ms ctx return context.DeadlineExceeded within 1 s; the Transport's connection is not reused after a timeout (connection count on the server rises)
