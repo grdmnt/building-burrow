@@ -106,10 +106,10 @@ func describe(n int) string {
 }
 ```
 
-**8. Math with floats.** The `math` package has what you'd expect: `math.Abs`, `math.Sqrt`, `math.Max`, `math.Pi`. It also has `math.NaN()`, a special float64 meaning "not a number", for answers that don't exist. NaN is not equal to anything, itself included, so you test for it with `math.IsNaN(x)`, never `x == math.NaN()`.
+**8. Math with floats.** The `math` package has what you'd expect: `math.Abs`, `math.Sqrt`, `math.Max`, `math.Pi`. It also has `math.NaN()`, a function that returns a special float64 meaning "not a number", for answers that don't exist. NaN isn't a separate type or an error: it is one of the values a float64 can hold, alongside ordinary numbers and the infinities (`math.Inf(1)`). So a function that returns `float64` can return `math.NaN()` like any other number. NaN is not equal to anything, itself included, so you test for it with `math.IsNaN(x)`, never `x == math.NaN()`. Ruby has the same value: `0.0 / 0.0` is `NaN` there too.
 
 ```go
-nan := math.NaN()
+var nan float64 = math.NaN() // just a float64
 fmt.Println(nan == nan, math.IsNaN(nan)) // false true
 fmt.Println(math.Abs(2.5 - 3))           // 0.5
 ```
