@@ -20,7 +20,27 @@ You also use multiple results, `:=`, conversions and `float64` from P.1 througho
 
 ## What's new here
 
-**1. The `for` loop.** Go's only loop is `for`. Its classic form has three parts separated by semicolons and no parentheses: an *init statement* run once before the loop, a *condition* checked before every pass, and a *post statement* run after every pass. The braces are required, even for one line. Variables declared in the init statement exist only inside the loop.
+**1. Packages up close.** P.1 used two packages; here is how they fit together, because from this level on your packages start calling each other.
+
+- **A package is a folder.** Every `.go` file directly inside `primer/basics/` belongs to one package, and each starts with the same line, `package basics`. Split it into as many files as you like (`greet.go`, `money.go`, `sizes.go`): Go treats them as one unit. There is no `require` between files of the same package; a function in `greet.go` can call an unexported function in `money.go` directly. Ruby needs `require_relative` to see another file; Go doesn't.
+- **A module is a tree of packages.** The `go.mod` at the root says `module burrow`, so the folder `primer/basics` has the *import path* `burrow/primer/basics`. Sub-folders are separate packages: `primer/basics/extra/` would be a package of its own, not part of `basics`.
+- **Importing.** Another package writes `import "burrow/primer/basics"` and then uses the last word of the path as the prefix: `basics.SplitBill(...)`. Only capitalised names are reachable through that prefix. That is the whole visibility system: inside the folder, everything is shared; outside it, only exported names.
+- **`package main` is the program.** A folder whose files say `package main` and that has a `func main()` builds into a program you can run (`primer/hello`). Every other package is a library that programs and other packages import.
+- **No import cycles.** If `flow` imports `basics`, `basics` can't import `flow`: the compiler refuses. That forces a direction on your code, which is why parts in this curriculum build on earlier parts and never the other way round.
+
+```text
+building-burrow/
+  go.mod                 module burrow
+  primer/
+    hello/main.go        package main   imports "burrow/primer/basics"
+    basics/greet.go      package basics  ┐ one package,
+    basics/money.go      package basics  ┘ two files
+    flow/flow.go         package flow    imports "burrow/primer/basics"
+```
+
+`go run ./primer/hello` builds that one program and everything it imports. `go test ./primer/...` tests every package under `primer/`, each on its own.
+
+**2. The `for` loop.** Go's only loop is `for`. Its classic form has three parts separated by semicolons and no parentheses: an *init statement* run once before the loop, a *condition* checked before every pass, and a *post statement* run after every pass. The braces are required, even for one line. Variables declared in the init statement exist only inside the loop.
 
 ```go
 sum := 0
@@ -32,7 +52,7 @@ fmt.Println(sum) // 10
 
 `i++` adds one to `i` (it is a statement, not an expression, so `x = i++` doesn't compile), and `sum += i` is short for `sum = sum + i`. Ruby would say `(1..4).each { |i| sum += i }` or `(1..4).sum`. Go also has `for i := range 4`, which counts 0, 1, 2, 3; P.3 covers `range` properly.
 
-**2. Leaving parts out.** The init and post statements are optional. Drop them and the semicolons too, and `for` is Ruby's `while`: just a condition.
+**3. Leaving parts out.** The init and post statements are optional. Drop them and the semicolons too, and `for` is Ruby's `while`: just a condition.
 
 ```go
 n := 1
@@ -42,7 +62,7 @@ for n < 1000 {
 fmt.Println(n) // 1024
 ```
 
-**3. Forever.** Leave out the condition as well and the loop runs until something inside it stops it: `return` leaves the whole function, `break` leaves the loop. This is Ruby's `loop do ... end`.
+**4. Forever.** Leave out the condition as well and the loop runs until something inside it stops it: `return` leaves the whole function, `break` leaves the loop. This is Ruby's `loop do ... end`.
 
 ```go
 tries := 0
@@ -55,7 +75,7 @@ for {
 fmt.Println(tries) // 3
 ```
 
-**4. `if`.** Like `for`, `if` has no parentheses around its condition and always needs braces. The condition must be a `bool`: Go has no "truthy" values, so `if n {` with an int `n` is a compile error, where Ruby would treat any number as true.
+**5. `if`.** Like `for`, `if` has no parentheses around its condition and always needs braces. The condition must be a `bool`: Go has no "truthy" values, so `if n {` with an int `n` is a compile error, where Ruby would treat any number as true.
 
 ```go
 temp := 31.5
@@ -64,7 +84,7 @@ if temp > 30 {
 }
 ```
 
-**5. `if` with a short statement.** `if` can run a short statement before its condition, separated by a semicolon. A variable declared there exists only in the `if` and its `else` branches, which keeps throwaway values out of the rest of the function. You'll see this constantly with errors in later levels.
+**6. `if` with a short statement.** `if` can run a short statement before its condition, separated by a semicolon. A variable declared there exists only in the `if` and its `else` branches, which keeps throwaway values out of the rest of the function. You'll see this constantly with errors in later levels.
 
 ```go
 if d := math.Abs(-0.003); d < 0.01 {
@@ -73,7 +93,7 @@ if d := math.Abs(-0.003); d < 0.01 {
 // d doesn't exist here
 ```
 
-**6. `if` and `else`.** `else` must sit on the same line as the closing brace before it, and `else if` chains as you'd expect. Go style prefers returning early over long `else` chains: handle the odd case first with an `if` that returns, then write the normal case unindented.
+**7. `if` and `else`.** `else` must sit on the same line as the closing brace before it, and `else if` chains as you'd expect. Go style prefers returning early over long `else` chains: handle the odd case first with an `if` that returns, then write the normal case unindented.
 
 ```go
 func describe(n int) string {
@@ -86,7 +106,7 @@ func describe(n int) string {
 }
 ```
 
-**7. Math with floats.** The `math` package has what you'd expect: `math.Abs`, `math.Sqrt`, `math.Max`, `math.Pi`. It also has `math.NaN()`, a special float64 meaning "not a number", for answers that don't exist. NaN is not equal to anything, itself included, so you test for it with `math.IsNaN(x)`, never `x == math.NaN()`.
+**8. Math with floats.** The `math` package has what you'd expect: `math.Abs`, `math.Sqrt`, `math.Max`, `math.Pi`. It also has `math.NaN()`, a special float64 meaning "not a number", for answers that don't exist. NaN is not equal to anything, itself included, so you test for it with `math.IsNaN(x)`, never `x == math.NaN()`.
 
 ```go
 nan := math.NaN()
@@ -94,14 +114,14 @@ fmt.Println(nan == nan, math.IsNaN(nan)) // false true
 fmt.Println(math.Abs(2.5 - 3))           // 0.5
 ```
 
-**8. Newton's method.** To find the square root of `x`, guess some `z`, then improve the guess: if `z*z` is too big, `z` is too big, and the amount to move by is `(z*z - x) / (2*z)`. Each new guess is `z - (z*z - x) / (2*z)`. Every step roughly doubles the number of correct digits, so after a handful of steps the guesses stop changing, and that is when you stop. This is the Tour's "Loops and Functions" exercise, and your `Sqrt` is exactly this loop.
+**9. Newton's method.** To find the square root of `x`, guess some `z`, then improve the guess: if `z*z` is too big, `z` is too big, and the amount to move by is `(z*z - x) / (2*z)`. Each new guess is `z - (z*z - x) / (2*z)`. Every step roughly doubles the number of correct digits, so after a handful of steps the guesses stop changing, and that is when you stop. This is the Tour's "Loops and Functions" exercise, and your `Sqrt` is exactly this loop.
 
 ```text
 x = 2, starting guess z = 1
 1  ->  1.5  ->  1.41667  ->  1.4142157  ->  1.41421356237469
 ```
 
-**9. `switch`.** A `switch` compares one value against a list of cases and runs the first that matches. Unlike C or JavaScript, a case does not fall through into the next one, so there is no `break` to forget. A case can list several values separated by commas, and `default` runs when nothing matches. Ruby's `case ... when` behaves the same way.
+**10. `switch`.** A `switch` compares one value against a list of cases and runs the first that matches. Unlike C or JavaScript, a case does not fall through into the next one, so there is no `break` to forget. A case can list several values separated by commas, and `default` runs when nothing matches. Ruby's `case ... when` behaves the same way.
 
 ```go
 switch day := time.Now().Weekday(); day {
@@ -114,7 +134,7 @@ default:
 
 As with `if`, the short statement before the value (`day := ...;`) is optional.
 
-**10. Evaluation order.** Cases are tried top to bottom, and the first match wins: the cases after it aren't even evaluated. When cases overlap, the more specific one has to come first.
+**11. Evaluation order.** Cases are tried top to bottom, and the first match wins: the cases after it aren't even evaluated. When cases overlap, the more specific one has to come first.
 
 ```go
 n := 100
@@ -126,7 +146,7 @@ case n > 50:
 }
 ```
 
-**11. `switch` with no condition.** Leave out the value and each case is a bool condition of its own: the first true one runs. This is Go's tidy replacement for a long `if`/`else if` chain, and it reads like Ruby's `case` with no subject.
+**12. `switch` with no condition.** Leave out the value and each case is a bool condition of its own: the first true one runs. This is Go's tidy replacement for a long `if`/`else if` chain, and it reads like Ruby's `case` with no subject.
 
 ```go
 func feel(temp float64) string {
@@ -141,7 +161,7 @@ func feel(temp float64) string {
 }
 ```
 
-**12. `defer`.** `defer f(args)` schedules the call `f(args)` to run when the surrounding function returns, however it returns. The arguments are evaluated immediately, when the `defer` line runs; only the call itself waits. In real code this is how you make sure cleanup happens: `defer file.Close()` right after opening a file. Ruby gets the same guarantee from `ensure` or a block (`File.open(...) do ... end`).
+**13. `defer`.** `defer f(args)` schedules the call `f(args)` to run when the surrounding function returns, however it returns. The arguments are evaluated immediately, when the `defer` line runs; only the call itself waits. In real code this is how you make sure cleanup happens: `defer file.Close()` right after opening a file. Ruby gets the same guarantee from `ensure` or a block (`File.open(...) do ... end`).
 
 ```go
 func show() {
@@ -154,7 +174,7 @@ func show() {
 // deferred, x was 1
 ```
 
-**13. Stacking defers.** Deferred calls go on a stack: the last one deferred runs first. A function that defers three calls runs them in the reverse of the order it reached them.
+**14. Stacking defers.** Deferred calls go on a stack: the last one deferred runs first. A function that defers three calls runs them in the reverse of the order it reached them.
 
 ```go
 func stack() {
@@ -165,7 +185,7 @@ func stack() {
 }
 ```
 
-**14. Building strings.** Strings join with `+` and `+=`, and `strconv.Itoa(n)` turns an int into its decimal string (`strconv.Itoa(42)` is `"42"`). Go does not convert numbers to strings for you, and `string(42)` is not `"42"` (it is the character with code 42, `*`, and `go vet` warns about it). For text built a piece at a time, a `strings.Builder` collects writes efficiently; `WriteString` adds to it and `String` gives you the result. Passing `&b` lets a function write into your builder rather than a copy of it (the `&` and the `*` in `*strings.Builder` are pointers, which P.3 explains).
+**15. Building strings.** Strings join with `+` and `+=`, and `strconv.Itoa(n)` turns an int into its decimal string (`strconv.Itoa(42)` is `"42"`). Go does not convert numbers to strings for you, and `string(42)` is not `"42"` (it is the character with code 42, `*`, and `go vet` warns about it). For text built a piece at a time, a `strings.Builder` collects writes efficiently; `WriteString` adds to it and `String` gives you the result. Passing `&b` lets a function write into your builder rather than a copy of it (the `&` and the `*` in `*strings.Builder` are pointers, which P.3 explains).
 
 ```go
 func label(b *strings.Builder, n int) {
@@ -180,7 +200,7 @@ fmt.Println(b.String()) // item 1; item 2;
 
 ## What to do
 
-1. Create `primer/flow/flow.go` with `package flow`.
+1. Create `primer/flow/flow.go` with `package flow`. If you like, split the work across files instead (`sqrt.go`, `fizzbuzz.go`, `countdown.go`, `receipt.go`), each starting with `package flow`: it's still one package.
 2. Write `Sqrt(x float64) (z float64, steps int)` with Newton's method:
    - a negative `x` returns `math.NaN()` and 0 steps; `x == 0` returns 0 and 0 steps, without looping
    - otherwise start from `z = 1.0`, and in a loop compute the next guess from `z`, adding one to `steps` each time you do
